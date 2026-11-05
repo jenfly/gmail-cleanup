@@ -111,7 +111,20 @@ async function api(path) {
   for (let a = 0; a < 8; a++) {
     const wait = gate - Date.now();
     if (wait > 0) await sleep(wait);
-    const r = await fetch(API + path, { headers: { Authorization: 'Bearer ' + token } });
+    let r;
+    try {
+      r = await fetch(API + path, { headers: { Authorization: 'Bearer ' + token } });
+    } catch (e) {
+      // "Failed to fetch": network dropped, phone slept or switched networks, or an
+      // error response arrived without CORS headers. Treat as transient and retry.
+      okStreak = 0;
+      concurrency = Math.max(1, Math.floor(concurrency / 2));
+      const ms = Math.min(30000, 1000 * 2 ** a) + Math.random() * 500;
+      gate = Math.max(gate, Date.now() + ms);
+      throttled = true;
+      say(`Connection hiccup. Retrying in ${Math.round(ms / 1000)}s…`);
+      continue;
+    }
     if (r.ok) {
       if (throttled && Date.now() >= gate) { throttled = false; say('Scanning…'); }
       if (++okStreak >= 40 && concurrency < CONC_MAX) { concurrency++; okStreak = 0; }
@@ -135,8 +148,21 @@ async function api(path) {
     // Anything else is a real problem (bad scope, API disabled, ...): show Google's message.
     throw new Error(`HTTP ${r.status}: ${err.message || reason || 'request failed'}`);
   }
-  throw new Error('Gave up: Gmail kept rate-limiting. Wait a few minutes and press Start scan to resume.');
+  throw new Error('Gave up after repeated network or rate-limit errors. Check your connection, then press Start scan to resume.');
 }
+
+/* ---------- Keep the screen awake while scanning (phones) ---------- */
+let wake = null;
+async function keepAwake(on) {
+  try {
+    if (on && 'wakeLock' in navigator) wake = await navigator.wakeLock.request('screen');
+    else if (wake) { await wake.release(); wake = null; }
+  } catch (e) { /* not supported or denied: scan still works */ }
+}
+// The browser drops the lock whenever the tab is hidden; take it back when we return.
+document.addEventListener('visibilitychange', () => {
+  if (running && document.visibilityState === 'visible') keepAwake(true);
+});
 
 /* ---------- Scan ---------- */
 function progress() {
@@ -159,6 +185,7 @@ function parseSender(headers) {
 }
 async function scan() {
   running = true;
+  keepAwake(true);
   $('scan').disabled = true; $('stop').disabled = false;
   try {
     total = (await api('/profile')).messagesTotal;
@@ -192,6 +219,7 @@ async function scan() {
     $('scan').disabled = e.message === 'expired';
   }
   running = false;
+  keepAwake(false);
   if (!$('scan').disabled || token) $('scan').disabled = false;
   $('stop').disabled = true;
 }
