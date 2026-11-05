@@ -59,6 +59,12 @@ Then open <http://localhost:8000>.
 
 **On GitHub Pages:** push `index.html` to a repo, enable Pages in the repo settings, and open the Pages URL.
 
+## Install on your phone
+
+Open the deployed page in Chrome on Android, tap the three-dot menu, then **Install app** (or **Add to Home screen**). It opens full-screen like a regular app. The service worker loads the newest version whenever you're online, so updates appear after you push them.
+
+If you test locally, give each project its own port (for example `python3 -m http.server 8001`) and add that origin under Authorized JavaScript origins. Service workers are tied to the address, and a port previously used by another app can keep serving that app.
+
 ## First sign-in
 
 Google will show an **"unverified app"** warning because the app is in Testing mode. Click **Advanced > Go to Mail sweeper (unsafe)**, then grant access. This is expected for your own personal project.
