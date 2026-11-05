@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mail sweeper</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { --bg:#eef2f4; --ink:#14232b; --muted:#5b6b73; --line:#cfd8dd; --accent:#1f6f5c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:1.6rem; margin:0 0 4px; }
+  #status { color:var(--muted); margin:0 0 16px; min-height:1.5em; }
+  .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; }
+  #fill { height:100%; width:0; background:var(--accent); transition:width .3s; }
+  #counts { margin:8px 0 16px; font-variant-numeric:tabular-nums; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:24px; }
+  button { font:inherit; padding:10px 14px; border:1px solid var(--ink); background:transparent; color:var(--ink); border-radius:6px; }
+  button.primary { background:var(--ink); color:#fff; }
+  button:disabled { opacity:.4; }
+  button:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  td, th { text-align:left; padding:8px 4px; border-bottom:1px solid var(--line); }
+  td:nth-child(n+2), th:nth-child(n+2) { text-align:right; white-space:nowrap; }
+  td:first-child { word-break:break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Mail sweeper</h1>
+  <p id="status">Not connected.</p>
+  <div class="bar"><div id="fill"></div></div>
+  <p id="counts"></p>
+  <div class="row">
+    <button id="connect" class="primary">Connect Gmail</button>
+    <button id="scan" disabled>Start scan</button>
+    <button id="stop" disabled>Pause</button>
+    <button id="report">Top senders</button>
+  </div>
+  <table id="table"></table>
+</main>
+
+<script>
+const CLIENT_ID = '164588121644-fqbd137vllni6v951h5um974agbnrhs0.apps.googleusercontent.com';
+const SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
+const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const CONCURRENCY = 8; // ~50 messages/sec stays under Gmail's quota
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const say = t => { $('status').textContent = t; };
+const fmt = b => b >= 1e9 ? (b/1e9).toFixed(2)+' GB' : b >= 1e6 ? (b/1e6).toFixed(1)+' MB' : Math.round(b/1e3)+' KB';
+
+let token = null, running = false, total = 0, done = 0;
+
+/* ---------- IndexedDB ---------- */
+const dbp = new Promise((res, rej) => {
+  const r = indexedDB.open('mailsweeper', 1);
+  r.onupgradeneeded = () => {
+    r.result.createObjectStore('msgs', { keyPath: 'id' });
+    r.result.createObjectStore('meta');
+  };
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+});
+async function run(store, mode, fn) {
+  const db = await dbp;
+  return new Promise((res, rej) => {
+    const t = db.transaction(store, mode);
+    const out = fn(t.objectStore(store));
+    t.oncomplete = () => res(out && out.result);
+    t.onerror = () => rej(t.error);
+  });
+}
+const getMeta = k => run('meta', 'readonly', s => s.get(k));
+const setMeta = (k, v) => run('meta', 'readwrite', s => { s.put(v, k); });
+const countMsgs = () => run('msgs', 'readonly', s => s.count());
+const putMany = rows => run('msgs', 'readwrite', s => { rows.forEach(r => s.put(r)); });
+async function missing(ids) {
+  const db = await dbp;
+  return new Promise(res => {
+    const t = db.transaction('msgs');
+    const s = t.objectStore('msgs'), out = [];
+    ids.forEach(id => { s.getKey(id).onsuccess = e => { if (e.target.result === undefined) out.push(id); }; });
+    t.oncomplete = () => res(out);
+  });
+}
+
+/* ---------- Auth ---------- */
+function connect() {
+  if (!window.google) { say('Google sign-in is still loading. Try again.'); return; }
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPE,
+    callback: r => {
+      if (r.error) { say('Sign-in failed: ' + r.error); return; }
+      token = r.access_token;
+      say('Connected. Tokens last about an hour; reconnect if the scan stops.');
+      $('scan').disabled = false;
+    }
+  });
+  client.requestAccessToken();
+}
+
+/* ---------- Gmail API with backoff ---------- */
+async function api(path) {
+  for (let a = 0; a < 5; a++) {
+    const r = await fetch(API + path, { headers: { Authorization: 'Bearer ' + token } });
+    if (r.ok) return r.json();
+    if (r.status === 401) throw new Error('expired');
+    if ([403, 429, 500, 503].includes(r.status)) { await sleep(1000 * 2 ** a); continue; }
+    throw new Error('HTTP ' + r.status);
+  }
+  throw new Error('Gave up after repeated rate-limit errors');
+}
+
+/* ---------- Scan ---------- */
+function progress() {
+  $('fill').style.width = total ? Math.min(100, done / total * 100) + '%' : '0';
+  $('counts').textContent = `${done.toLocaleString()} of ${total.toLocaleString()} messages scanned`;
+}
+async function pool(items, n, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: n }, async () => {
+    while (running && i < items.length) await fn(items[i++]);
+  }));
+}
+function parseSender(headers) {
+  const v = (headers && headers[0] && headers[0].value) || 'unknown';
+  const m = v.match(/<([^>]+)>/);
+  return (m ? m[1] : v).trim().toLowerCase();
+}
+async function scan() {
+  running = true;
+  $('scan').disabled = true; $('stop').disabled = false;
+  try {
+    total = (await api('/profile')).messagesTotal;
+    const meta = (await getMeta('scan')) || {};
+    let page = meta.pageToken;
+    done = await countMsgs();
+    progress(); say('Scanning…');
+    while (running) {
+      const list = await api('/messages?maxResults=500&includeSpamTrash=true' + (page ? '&pageToken=' + page : ''));
+      const todo = await missing((list.messages || []).map(m => m.id));
+      const rows = [];
+      await pool(todo, CONCURRENCY, async id => {
+        const m = await api(`/messages/${id}?format=metadata&metadataHeaders=From&fields=id,sizeEstimate,internalDate,labelIds,payload/headers`);
+        rows.push({ id: m.id, from: parseSender(m.payload && m.payload.headers),
+                    date: +m.internalDate, size: m.sizeEstimate, labels: m.labelIds || [] });
+        done++;
+        if (done % 25 === 0) progress();
+      });
+      await putMany(rows); // save whatever finished, even if paused mid-page
+      progress();
+      if (!running) break;
+      page = list.nextPageToken;
+      await setMeta('scan', { pageToken: page });
+      if (!page) { say('Scan complete. Run it again anytime to pick up new mail.'); break; }
+    }
+    if (!running) say('Paused. Start scan resumes where it left off.');
+  } catch (e) {
+    say(e.message === 'expired'
+      ? 'Session expired. Reconnect, then Start scan to resume.'
+      : 'Stopped: ' + e.message);
+    $('scan').disabled = e.message === 'expired';
+  }
+  running = false;
+  if (!$('scan').disabled || token) $('scan').disabled = false;
+  $('stop').disabled = true;
+}
+
+/* ---------- Report ---------- */
+async function report() {
+  const by = {};
+  const db = await dbp;
+  await new Promise(res => {
+    const t = db.transaction('msgs');
+    t.objectStore('msgs').openCursor().onsuccess = e => {
+      const c = e.target.result;
+      if (!c) return;
+      const v = c.value, g = by[v.from] || (by[v.from] = { n: 0, bytes: 0 });
+      g.n++; g.bytes += v.size;
+      c.continue();
+    };
+    t.oncomplete = res;
+  });
+  const top = Object.entries(by).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 25);
+  const table = $('table');
+  table.replaceChildren();
+  const head = table.insertRow();
+  ['Sender', 'Messages', 'Size'].forEach(h => { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); });
+  top.forEach(([s, g]) => {
+    const r = table.insertRow();
+    [s, g.n.toLocaleString(), fmt(g.bytes)].forEach(t => { r.insertCell().textContent = t; });
+  });
+  if (!top.length) say('Nothing scanned yet.');
+}
+
+$('connect').onclick = connect;
+$('scan').onclick = scan;
+$('stop').onclick = () => { running = false; };
+$('report').onclick = report;
+countMsgs().then(n => { if (n) { done = n; $('counts').textContent = `${n.toLocaleString()} messages saved from an earlier scan`; } });
+</script>
+</body>
+</html>
