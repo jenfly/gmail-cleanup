@@ -45,7 +45,10 @@
 const CLIENT_ID = '164588121644-fqbd137vllni6v951h5um974agbnrhs0.apps.googleusercontent.com';
 const SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
-const CONCURRENCY = 8; // ~50 messages/sec stays under Gmail's quota
+const CONC_MAX = 6;       // ceiling for parallel requests
+let concurrency = 4;      // adapts: halves on rate limits, creeps back up on success
+let gate = 0;             // timestamp until which ALL requests wait (shared backoff)
+let okStreak = 0, throttled = false;
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -105,14 +108,34 @@ function connect() {
 
 /* ---------- Gmail API with backoff ---------- */
 async function api(path) {
-  for (let a = 0; a < 5; a++) {
+  for (let a = 0; a < 8; a++) {
+    const wait = gate - Date.now();
+    if (wait > 0) await sleep(wait);
     const r = await fetch(API + path, { headers: { Authorization: 'Bearer ' + token } });
-    if (r.ok) return r.json();
+    if (r.ok) {
+      if (throttled && Date.now() >= gate) { throttled = false; say('Scanning…'); }
+      if (++okStreak >= 40 && concurrency < CONC_MAX) { concurrency++; okStreak = 0; }
+      return r.json();
+    }
     if (r.status === 401) throw new Error('expired');
-    if ([403, 429, 500, 503].includes(r.status)) { await sleep(1000 * 2 ** a); continue; }
-    throw new Error('HTTP ' + r.status);
+    const body = await r.json().catch(() => ({}));
+    const err = body.error || {};
+    const reason = (err.errors && err.errors[0] && err.errors[0].reason) || '';
+    const limited = r.status === 429 || (r.status === 403 && /rate|quota/i.test(reason));
+    if (limited || r.status >= 500) {
+      // Back off every worker together, with jitter, and slow down.
+      okStreak = 0;
+      concurrency = Math.max(1, Math.floor(concurrency / 2));
+      const ms = Math.min(60000, 2000 * 2 ** a) + Math.random() * 1000;
+      gate = Math.max(gate, Date.now() + ms);
+      throttled = true;
+      say(`Gmail asked us to slow down. Waiting ${Math.round(ms / 1000)}s, then continuing…`);
+      continue;
+    }
+    // Anything else is a real problem (bad scope, API disabled, ...): show Google's message.
+    throw new Error(`HTTP ${r.status}: ${err.message || reason || 'request failed'}`);
   }
-  throw new Error('Gave up after repeated rate-limit errors');
+  throw new Error('Gave up: Gmail kept rate-limiting. Wait a few minutes and press Start scan to resume.');
 }
 
 /* ---------- Scan ---------- */
@@ -122,8 +145,11 @@ function progress() {
 }
 async function pool(items, n, fn) {
   let i = 0;
-  await Promise.all(Array.from({ length: n }, async () => {
-    while (running && i < items.length) await fn(items[i++]);
+  await Promise.all(Array.from({ length: n }, async (_, k) => {
+    while (running && i < items.length) {
+      if (k >= concurrency) { await sleep(250); continue; } // extra workers idle when throttled
+      await fn(items[i++]);
+    }
   }));
 }
 function parseSender(headers) {
@@ -144,7 +170,7 @@ async function scan() {
       const list = await api('/messages?maxResults=500&includeSpamTrash=true' + (page ? '&pageToken=' + page : ''));
       const todo = await missing((list.messages || []).map(m => m.id));
       const rows = [];
-      await pool(todo, CONCURRENCY, async id => {
+      await pool(todo, CONC_MAX, async id => {
         const m = await api(`/messages/${id}?format=metadata&metadataHeaders=From&fields=id,sizeEstimate,internalDate,labelIds,payload/headers`);
         rows.push({ id: m.id, from: parseSender(m.payload && m.payload.headers),
                     date: +m.internalDate, size: m.sizeEstimate, labels: m.labelIds || [] });
