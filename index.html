@@ -2,28 +2,31 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#eef2f4">
 <title>Mail sweeper</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root { --bg:#eef2f4; --ink:#14232b; --muted:#5b6b73; --line:#cfd8dd; --accent:#1f6f5c; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, sans-serif; }
-  main { max-width:640px; margin:0 auto; padding:24px 16px 48px; }
+  main { max-width:640px; margin:0 auto; padding:max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(48px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   h1 { font-size:1.6rem; margin:0 0 4px; }
   #status { color:var(--muted); margin:0 0 16px; min-height:1.5em; }
   .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; }
   #fill { height:100%; width:0; background:var(--accent); transition:width .3s; }
   #counts { margin:8px 0 16px; font-variant-numeric:tabular-nums; }
   .row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:24px; }
-  button { font:inherit; padding:10px 14px; border:1px solid var(--ink); background:transparent; color:var(--ink); border-radius:6px; }
+  .row button { flex:1 1 calc(50% - 8px); }
+  button { font:inherit; min-height:48px; padding:10px 14px; touch-action:manipulation; border:1px solid var(--ink); background:transparent; color:var(--ink); border-radius:6px; }
   button.primary { background:var(--ink); color:#fff; }
   button:disabled { opacity:.4; }
   button:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
-  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
-  td, th { text-align:left; padding:8px 4px; border-bottom:1px solid var(--line); }
-  td:nth-child(n+2), th:nth-child(n+2) { text-align:right; white-space:nowrap; }
-  td:first-child { word-break:break-all; }
+  #list { list-style:none; margin:0; padding:0; }
+  #list li { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .who { word-break:break-all; min-width:0; }
+  .size { font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .num { display:block; color:var(--muted); font-size:.85rem; font-weight:400; text-align:right; }
 </style>
 </head>
 <body>
@@ -38,16 +41,18 @@
     <button id="stop" disabled>Pause</button>
     <button id="report">Top senders</button>
   </div>
-  <table id="table"></table>
+  <ul id="list"></ul>
 </main>
 
 <script>
 const CLIENT_ID = '164588121644-fqbd137vllni6v951h5um974agbnrhs0.apps.googleusercontent.com';
 const SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
-const CONC_MAX = 6;       // ceiling for parallel requests
-let concurrency = 4;      // adapts: halves on rate limits, creeps back up on success
-let gate = 0;             // timestamp until which ALL requests wait (shared backoff)
+const WORKERS = 8;        // parallel requests in flight; the pacer below sets the real speed
+let rate = 25;            // requests/sec we allow ourselves; drops on rate limits, creeps back up
+const RATE_MIN = 4, RATE_MAX = 40;
+let nextSlot = 0;         // pacing schedule: each request takes the next free time slot
+let gate = 0;             // shared pause: nothing is sent before this timestamp
 let okStreak = 0, throttled = false;
 
 const $ = id => document.getElementById(id);
@@ -55,7 +60,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const say = t => { $('status').textContent = t; };
 const fmt = b => b >= 1e9 ? (b/1e9).toFixed(2)+' GB' : b >= 1e6 ? (b/1e6).toFixed(1)+' MB' : Math.round(b/1e3)+' KB';
 
-let token = null, running = false, total = 0, done = 0;
+let token = null, running = false, total = 0, done = 0, scanStart = 0, doneAtStart = 0;
 
 /* ---------- IndexedDB ---------- */
 const dbp = new Promise((res, rej) => {
@@ -109,16 +114,16 @@ function connect() {
 /* ---------- Gmail API with backoff ---------- */
 async function api(path) {
   for (let a = 0; a < 8; a++) {
-    const wait = gate - Date.now();
-    if (wait > 0) await sleep(wait);
+    // Wait for any shared pause, then take the next slot in the pacing schedule.
+    const now = Date.now();
+    const slot = Math.max(now, nextSlot, gate);
+    nextSlot = slot + 1000 / rate;
+    if (slot > now) await sleep(slot - now);
     let r;
     try {
       r = await fetch(API + path, { headers: { Authorization: 'Bearer ' + token } });
     } catch (e) {
-      // "Failed to fetch": network dropped, phone slept or switched networks, or an
-      // error response arrived without CORS headers. Treat as transient and retry.
-      okStreak = 0;
-      concurrency = Math.max(1, Math.floor(concurrency / 2));
+      // "Failed to fetch": network dropped, phone slept, or an error response with no CORS headers.
       const ms = Math.min(30000, 1000 * 2 ** a) + Math.random() * 500;
       gate = Math.max(gate, Date.now() + ms);
       throttled = true;
@@ -127,7 +132,7 @@ async function api(path) {
     }
     if (r.ok) {
       if (throttled && Date.now() >= gate) { throttled = false; say('Scanning…'); }
-      if (++okStreak >= 40 && concurrency < CONC_MAX) { concurrency++; okStreak = 0; }
+      if (++okStreak >= 100 && rate < RATE_MAX) { rate = Math.min(RATE_MAX, rate + 2); okStreak = 0; }
       return r.json();
     }
     if (r.status === 401) throw new Error('expired');
@@ -136,16 +141,17 @@ async function api(path) {
     const reason = (err.errors && err.errors[0] && err.errors[0].reason) || '';
     const limited = r.status === 429 || (r.status === 403 && /rate|quota/i.test(reason));
     if (limited || r.status >= 500) {
-      // Back off every worker together, with jitter, and slow down.
       okStreak = 0;
-      concurrency = Math.max(1, Math.floor(concurrency / 2));
-      const ms = Math.min(60000, 2000 * 2 ** a) + Math.random() * 1000;
+      rate = Math.max(RATE_MIN, rate * 0.7);
+      let ms = Math.min(60000, 1500 * 2 ** a) + Math.random() * 500;
+      // Google's message often says exactly when to retry; use that instead of guessing.
+      const m = (err.message || '').match(/Retry after (\d{4}-\d\d-\d\dT[\d:.]+Z)/);
+      if (m) ms = Math.min(120000, Math.max(1000, Date.parse(m[1]) - Date.now())) + Math.random() * 300;
       gate = Math.max(gate, Date.now() + ms);
       throttled = true;
       say(`Gmail asked us to slow down. Waiting ${Math.round(ms / 1000)}s, then continuing…`);
       continue;
     }
-    // Anything else is a real problem (bad scope, API disabled, ...): show Google's message.
     throw new Error(`HTTP ${r.status}: ${err.message || reason || 'request failed'}`);
   }
   throw new Error('Gave up after repeated network or rate-limit errors. Check your connection, then press Start scan to resume.');
@@ -167,15 +173,18 @@ document.addEventListener('visibilitychange', () => {
 /* ---------- Scan ---------- */
 function progress() {
   $('fill').style.width = total ? Math.min(100, done / total * 100) + '%' : '0';
-  $('counts').textContent = `${done.toLocaleString()} of ${total.toLocaleString()} messages scanned`;
+  let line = `${done.toLocaleString()} of ${total.toLocaleString()} messages scanned`;
+  const secs = (Date.now() - scanStart) / 1000, r = (done - doneAtStart) / secs;
+  if (running && scanStart && secs > 20 && r > 0.5) {
+    const min = Math.ceil((total - done) / r / 60);
+    line += ` (about ${r.toFixed(0)}/sec, ${min > 90 ? Math.round(min / 60) + ' h' : min + ' min'} left)`;
+  }
+  $('counts').textContent = line;
 }
 async function pool(items, n, fn) {
   let i = 0;
-  await Promise.all(Array.from({ length: n }, async (_, k) => {
-    while (running && i < items.length) {
-      if (k >= concurrency) { await sleep(250); continue; } // extra workers idle when throttled
-      await fn(items[i++]);
-    }
+  await Promise.all(Array.from({ length: n }, async () => {
+    while (running && i < items.length) await fn(items[i++]);
   }));
 }
 function parseSender(headers) {
@@ -192,12 +201,13 @@ async function scan() {
     const meta = (await getMeta('scan')) || {};
     let page = meta.pageToken;
     done = await countMsgs();
+    scanStart = Date.now(); doneAtStart = done;
     progress(); say('Scanning…');
     while (running) {
       const list = await api('/messages?maxResults=500&includeSpamTrash=true' + (page ? '&pageToken=' + page : ''));
       const todo = await missing((list.messages || []).map(m => m.id));
       const rows = [];
-      await pool(todo, CONC_MAX, async id => {
+      await pool(todo, WORKERS, async id => {
         const m = await api(`/messages/${id}?format=metadata&metadataHeaders=From&fields=id,sizeEstimate,internalDate,labelIds,payload/headers`);
         rows.push({ id: m.id, from: parseSender(m.payload && m.payload.headers),
                     date: +m.internalDate, size: m.sizeEstimate, labels: m.labelIds || [] });
@@ -240,13 +250,16 @@ async function report() {
     t.oncomplete = res;
   });
   const top = Object.entries(by).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 25);
-  const table = $('table');
-  table.replaceChildren();
-  const head = table.insertRow();
-  ['Sender', 'Messages', 'Size'].forEach(h => { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); });
-  top.forEach(([s, g]) => {
-    const r = table.insertRow();
-    [s, g.n.toLocaleString(), fmt(g.bytes)].forEach(t => { r.insertCell().textContent = t; });
+  const list = $('list');
+  list.replaceChildren();
+  top.forEach(([sender, g]) => {
+    const li = document.createElement('li');
+    const who = document.createElement('span'); who.className = 'who'; who.textContent = sender;
+    const size = document.createElement('span'); size.className = 'size'; size.textContent = fmt(g.bytes);
+    const num = document.createElement('span'); num.className = 'num'; num.textContent = g.n.toLocaleString() + ' messages';
+    size.appendChild(num);
+    li.append(who, size);
+    list.appendChild(li);
   });
   if (!top.length) say('Nothing scanned yet.');
 }
