@@ -16,6 +16,7 @@
   main { max-width:640px; margin:0 auto; padding:max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(48px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   h1 { font-size:1.6rem; margin:0 0 4px; }
   #status { color:var(--muted); margin:0 0 16px; min-height:1.5em; }
+  #status.alert { color:var(--ink); font-weight:600; }
   .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; }
   #fill { height:100%; width:0; background:var(--accent); transition:width .3s; }
   #counts { margin:8px 0 16px; font-variant-numeric:tabular-nums; }
@@ -60,10 +61,16 @@ let okStreak = 0, throttled = false;
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const say = t => { $('status').textContent = t; };
+const say = (t, alert = false) => {
+  $('status').textContent = t;
+  $('status').classList.toggle('alert', alert);
+};
+// Messages from background retries must never overwrite a final status like "Paused" or "Session expired".
+const sayIfRunning = t => { if (running) say(t); };
 const fmt = b => b >= 1e9 ? (b/1e9).toFixed(2)+' GB' : b >= 1e6 ? (b/1e6).toFixed(1)+' MB' : Math.round(b/1e3)+' KB';
 
 let token = null, running = false, total = 0, done = 0, scanStart = 0, doneAtStart = 0;
+let needsReconnect = false, scanGen = 0;
 
 /* ---------- IndexedDB ---------- */
 const dbp = new Promise((res, rej) => {
@@ -99,16 +106,26 @@ async function missing(ids) {
 }
 
 /* ---------- Auth ---------- */
+function needReconnect() {
+  needsReconnect = true;
+  token = null;
+  $('connect').textContent = 'Reconnect & resume';
+  say('Paused: your Gmail session expired (they last about an hour). Tap "Reconnect & resume" to carry on where you left off. Nothing was lost.', true);
+}
 function connect() {
   if (!window.google) { say('Google sign-in is still loading. Try again.'); return; }
   const client = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
     scope: SCOPE,
     callback: r => {
-      if (r.error) { say('Sign-in failed: ' + r.error); return; }
+      if (r.error) { say('Sign-in failed: ' + r.error, true); return; }
       token = r.access_token;
-      say('Connected. Tokens last about an hour; reconnect if the scan stops.');
+      const resume = needsReconnect;
+      needsReconnect = false;
+      $('connect').textContent = 'Connect Gmail';
       $('scan').disabled = false;
+      if (resume) scan(); // came here because the session expired: carry on automatically
+      else say('Connected. Tap Start scan. Sessions last about an hour.');
     }
   });
   client.requestAccessToken();
@@ -130,15 +147,15 @@ async function api(path) {
       const ms = Math.min(30000, 1000 * 2 ** a) + Math.random() * 500;
       gate = Math.max(gate, Date.now() + ms);
       throttled = true;
-      say(`Connection hiccup. Retrying in ${Math.round(ms / 1000)}s…`);
+      sayIfRunning(`Connection hiccup. Retrying in ${Math.round(ms / 1000)}s…`);
       continue;
     }
     if (r.ok) {
-      if (throttled && Date.now() >= gate) { throttled = false; say('Scanning…'); }
+      if (throttled && Date.now() >= gate) { throttled = false; sayIfRunning('Scanning…'); }
       if (++okStreak >= 100 && rate < RATE_MAX) { rate = Math.min(RATE_MAX, rate + 2); okStreak = 0; }
       return r.json();
     }
-    if (r.status === 401) throw new Error('expired');
+    if (r.status === 401) { running = false; throw new Error('expired'); } // stop every worker
     const body = await r.json().catch(() => ({}));
     const err = body.error || {};
     const reason = (err.errors && err.errors[0] && err.errors[0].reason) || '';
@@ -152,7 +169,7 @@ async function api(path) {
       if (m) ms = Math.min(120000, Math.max(1000, Date.parse(m[1]) - Date.now())) + Math.random() * 300;
       gate = Math.max(gate, Date.now() + ms);
       throttled = true;
-      say(`Gmail asked us to slow down. Waiting ${Math.round(ms / 1000)}s, then continuing…`);
+      sayIfRunning(`Gmail asked us to slow down. Waiting ${Math.round(ms / 1000)}s, then continuing…`);
       continue;
     }
     throw new Error(`HTTP ${r.status}: ${err.message || reason || 'request failed'}`);
@@ -186,8 +203,9 @@ function progress() {
 }
 async function pool(items, n, fn) {
   let i = 0;
+  const g = scanGen; // workers from an earlier, aborted scan must not keep going
   await Promise.all(Array.from({ length: n }, async () => {
-    while (running && i < items.length) await fn(items[i++]);
+    while (running && g === scanGen && i < items.length) await fn(items[i++]);
   }));
 }
 function parseSender(headers) {
@@ -196,6 +214,7 @@ function parseSender(headers) {
   return (m ? m[1] : v).trim().toLowerCase();
 }
 async function scan() {
+  scanGen++;
   running = true;
   keepAwake(true);
   $('scan').disabled = true; $('stop').disabled = false;
@@ -210,14 +229,17 @@ async function scan() {
       const list = await api('/messages?maxResults=500&includeSpamTrash=true' + (page ? '&pageToken=' + page : ''));
       const todo = await missing((list.messages || []).map(m => m.id));
       const rows = [];
-      await pool(todo, WORKERS, async id => {
-        const m = await api(`/messages/${id}?format=metadata&metadataHeaders=From&fields=id,sizeEstimate,internalDate,labelIds,payload/headers`);
-        rows.push({ id: m.id, from: parseSender(m.payload && m.payload.headers),
-                    date: +m.internalDate, size: m.sizeEstimate, labels: m.labelIds || [] });
-        done++;
-        if (done % 25 === 0) progress();
-      });
-      await putMany(rows); // save whatever finished, even if paused mid-page
+      try {
+        await pool(todo, WORKERS, async id => {
+          const m = await api(`/messages/${id}?format=metadata&metadataHeaders=From&fields=id,sizeEstimate,internalDate,labelIds,payload/headers`);
+          rows.push({ id: m.id, from: parseSender(m.payload && m.payload.headers),
+                      date: +m.internalDate, size: m.sizeEstimate, labels: m.labelIds || [] });
+          done++;
+          if (done % 25 === 0) progress();
+        });
+      } finally {
+        await putMany(rows); // save whatever finished, even if paused or the session expired mid-page
+      }
       progress();
       if (!running) break;
       page = list.nextPageToken;
@@ -226,15 +248,13 @@ async function scan() {
     }
     if (!running) say('Paused. Start scan resumes where it left off.');
   } catch (e) {
-    say(e.message === 'expired'
-      ? 'Session expired. Reconnect, then Start scan to resume.'
-      : 'Stopped: ' + e.message);
-    $('scan').disabled = e.message === 'expired';
+    if (e.message === 'expired') needReconnect();
+    else say('Stopped: ' + e.message, true);
   }
   running = false;
   keepAwake(false);
-  if (!$('scan').disabled || token) $('scan').disabled = false;
   $('stop').disabled = true;
+  $('scan').disabled = needsReconnect; // can't scan again until we have a fresh token
 }
 
 /* ---------- Report ---------- */
