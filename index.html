@@ -31,6 +31,10 @@
   #filter label { display:block; margin:14px 0 0; font-size:.95rem; color:var(--muted); }
   #filter input, #filter select { display:block; width:100%; min-height:48px; margin-top:4px; padding:8px 12px; font:inherit; font-size:16px; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:6px; }
   .match { font-weight:600; margin:16px 0 0; min-height:1.5em; }
+  .hint { color:var(--muted); font-size:.9rem; margin:8px 0 0; }
+  #filter h2 + .hint { margin-bottom:4px; }
+  #filter h2:not(:first-child) { margin-top:28px; }
+  button.danger { background:#8a2c2c; border-color:#8a2c2c; color:#fff; }
   #filter .row { margin:16px 0 0; }
   #list { list-style:none; margin:0; padding:0; }
   #list li { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
@@ -76,6 +80,13 @@
       <button id="fShow">Show biggest matches</button>
       <button id="fClear">Remove this label</button>
     </div>
+    <h2>Move to Trash</h2>
+    <p class="hint">Moves every message that still has the label above to Trash. Messages you un-labelled in Gmail are left alone, and starred messages are always skipped. Gmail keeps Trash for 30 days, and space is only freed once Trash is emptied.</p>
+    <div class="row">
+      <button id="tTrash" class="danger">Trash labelled messages</button>
+      <button id="tUndo">Undo last trash</button>
+    </div>
+    <p id="tInfo" class="hint"></p>
   </section>
   <ul id="list"></ul>
 </main>
@@ -470,7 +481,7 @@ async function sync() {
   } finally {
     syncing = false;
     $('scan').disabled = needsReconnect; $('sync').disabled = needsReconnect;
-    if (!$('filter').hidden) { reviewRows = await everything(); updateMatch(); } // keep the open review panel current
+    if (!$('filter').hidden) { reviewRows = await everything(); updateMatch(); updateTrashInfo(); } // keep the open review panel current
   }
 }
 
@@ -592,7 +603,7 @@ async function openReview() {
   $('filter').hidden = false;
   reviewRows = await everything();
   if (!reviewRows.length) { say('Nothing scanned yet.'); return; }
-  updateMatch();
+  updateMatch(); updateTrashInfo();
   $('filter').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 async function showMatches() {
@@ -636,6 +647,93 @@ async function applyLabel() {
     else say('Labelling stopped: ' + e.message, true);
   }
 }
+/* ---------- Move to Trash (with undo) ---------- */
+async function bulkTrash(ids, undo) {
+  try {
+    await batchLabel(ids, undo ? { removeLabelIds: ['TRASH'] } : { addLabelIds: ['TRASH'] });
+    return;
+  } catch (e) {
+    if (e.status !== 400 && e.status !== 404) throw e;
+  }
+  // Fallback: one message at a time (repeating a message is harmless; vanished ones are skipped).
+  let n = 0;
+  for (const id of ids) {
+    try { await api(`/messages/${id}/${undo ? 'untrash' : 'trash'}`, { method: 'POST' }); }
+    catch (e) { if (e.status !== 404) throw e; }
+    if (++n % 50 === 0) say(`Working… ${n.toLocaleString()} of ${ids.length.toLocaleString()}`);
+  }
+}
+async function updateTrashInfo() {
+  const t = reviewRows.filter(m => m.labels.includes('TRASH'));
+  const log = (await getMeta('trashLog')) || [];
+  const last = log[log.length - 1];
+  $('tInfo').textContent = `In Trash now: ${msgs(t.length)}, ${fmt(t.reduce((a, m) => a + m.size, 0))}.` +
+    (last ? ` Last trash run: ${msgs(last.ids.length)} on ${new Date(last.at).toLocaleDateString()}.` : '');
+}
+function setCached(ids, change) {
+  const set = new Set(ids), rows = reviewRows.filter(m => set.has(m.id));
+  rows.forEach(change);
+  return putMany(rows);
+}
+async function trashLabelled() {
+  const name = labelName();
+  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  if (!name) { say('Enter the label name above.', true); return; }
+  try {
+    say('Checking Gmail…');
+    const id = await findLabel(name);
+    if (!id) { say(`No label called "${name}" exists in Gmail.`); return; }
+    // Ask Gmail directly (not the local copy), so anything you un-labelled or starred in Gmail is respected.
+    const [labelled, starred, trashed] = await Promise.all([listIds(id), listIds('STARRED'), listIds('TRASH')]);
+    const ids = [...labelled].filter(x => !starred.has(x) && !trashed.has(x));
+    const skipped = [...labelled].filter(x => starred.has(x)).length;
+    if (!ids.length) { say(`Nothing to trash: no un-starred messages labelled "${name}" outside Trash.`); return; }
+    const byId = new Map(reviewRows.map(m => [m.id, m]));
+    const bytes = ids.reduce((t, x) => t + ((byId.get(x) || {}).size || 0), 0);
+    const ok = confirm(`Move ${msgs(ids.length)} (${fmt(bytes)}) labelled "${name}" to Trash?` +
+      (skipped ? `\n\n${msgs(skipped)} starred will be skipped.` : '') +
+      '\n\nYou can undo from this screen, and Gmail keeps Trash for 30 days.');
+    if (!ok) { say('Cancelled. Nothing was changed.'); return; }
+    await bulkTrash(ids, false);
+    const log = (await getMeta('trashLog')) || [];
+    log.push({ at: Date.now(), ids, bytes });
+    await setMeta('trashLog', log.slice(-10));
+    await setCached(ids, m => { if (!m.labels.includes('TRASH')) m.labels.push('TRASH'); });
+    updateMatch(); await updateTrashInfo();
+    say(`Moved ${msgs(ids.length)} (${fmt(bytes)}) to Trash. Space is freed when Trash is emptied in Gmail, or after 30 days.`);
+  } catch (e) {
+    if (e.message === 'expired') say('Session expired. Tap Connect Gmail, then try again.', true);
+    else say('Stopped: ' + e.message + '. Tap Sync with Gmail to see where things stand.', true);
+  }
+}
+async function undoTrash() {
+  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  try {
+    const log = (await getMeta('trashLog')) || [];
+    const last = log[log.length - 1];
+    if (!last) { say('Nothing to undo.'); return; }
+    say('Checking Gmail…');
+    // Only messages still in Trash can come back; emptied ones are gone for good.
+    const inTrash = await listIds('TRASH');
+    const ids = last.ids.filter(x => inTrash.has(x));
+    if (!ids.length) {
+      await setMeta('trashLog', log.slice(0, -1));
+      say('None of those messages are still in Trash, so there is nothing to restore.');
+      return;
+    }
+    const ok = confirm(`Restore ${msgs(ids.length)} from Trash? (${msgs(last.ids.length)} were moved on ${new Date(last.at).toLocaleString()}.)`);
+    if (!ok) { say('Cancelled. Nothing was changed.'); return; }
+    await bulkTrash(ids, true);
+    await setMeta('trashLog', log.slice(0, -1));
+    await setCached(ids, m => { m.labels = m.labels.filter(l => l !== 'TRASH'); });
+    updateMatch(); await updateTrashInfo();
+    say(`Restored ${msgs(ids.length)} from Trash.`);
+  } catch (e) {
+    if (e.message === 'expired') say('Session expired. Tap Connect Gmail, then try again.', true);
+    else say('Stopped: ' + e.message, true);
+  }
+}
+
 async function removeLabel() {
   const name = labelName();
   if (!token) { say('Tap Connect Gmail first.', true); return; }
@@ -665,6 +763,8 @@ $('review').onclick = openReview;
 $('fShow').onclick = showMatches;
 $('fApply').onclick = applyLabel;
 $('fClear').onclick = removeLabel;
+$('tTrash').onclick = trashLabelled;
+$('tUndo').onclick = undoTrash;
 countMsgs().then(n => { if (n) { done = n; $('counts').textContent = `${n.toLocaleString()} messages saved from an earlier scan`; } });
 </script>
 </body>
