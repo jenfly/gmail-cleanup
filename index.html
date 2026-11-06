@@ -28,7 +28,9 @@
   button:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
   #list { list-style:none; margin:0; padding:0; }
   #list li { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
-  .who { word-break:break-all; min-width:0; }
+  .who { word-break:break-word; min-width:0; }
+  .sub { display:block; color:var(--muted); font-size:.85rem; }
+  #list li.head { display:block; font-weight:700; padding:22px 0 8px; border-bottom:2px solid var(--ink); }
   .size { font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
   .num { display:block; color:var(--muted); font-size:.85rem; font-weight:400; text-align:right; }
 </style>
@@ -44,6 +46,8 @@
     <button id="scan" disabled>Start scan</button>
     <button id="stop" disabled>Pause</button>
     <button id="report">Top senders</button>
+    <button id="overview">Where's the space?</button>
+    <button id="biggest">Biggest messages</button>
   </div>
   <ul id="list"></ul>
 </main>
@@ -67,6 +71,7 @@ const say = (t, alert = false) => {
 };
 // Messages from background retries must never overwrite a final status like "Paused" or "Session expired".
 const sayIfRunning = t => { if (running) say(t); };
+const msgs = n => n.toLocaleString() + (n === 1 ? ' message' : ' messages');
 const fmt = b => b >= 1e9 ? (b/1e9).toFixed(2)+' GB' : b >= 1e6 ? (b/1e6).toFixed(1)+' MB' : Math.round(b/1e3)+' KB';
 
 let token = null, running = false, total = 0, done = 0, scanStart = 0, doneAtStart = 0;
@@ -300,40 +305,99 @@ async function scan() {
 }
 
 /* ---------- Report ---------- */
-async function report() {
-  const by = {};
-  const db = await dbp;
-  await new Promise(res => {
-    const t = db.transaction('msgs');
-    t.objectStore('msgs').openCursor().onsuccess = e => {
-      const c = e.target.result;
-      if (!c) return;
-      const v = c.value, g = by[v.from] || (by[v.from] = { n: 0, bytes: 0 });
-      g.n++; g.bytes += v.size;
-      c.continue();
-    };
-    t.oncomplete = res;
-  });
-  const top = Object.entries(by).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 25);
+const everything = async () => (await run('msgs', 'readonly', st => st.getAll())).filter(m => !m.bad);
+
+// sections: [{ title, rows: [{ label, sub, bytes, num, id }] }]
+function renderSections(sections) {
   const list = $('list');
   list.replaceChildren();
-  top.forEach(([sender, g]) => {
-    const li = document.createElement('li');
-    const who = document.createElement('span'); who.className = 'who'; who.textContent = sender;
-    const size = document.createElement('span'); size.className = 'size'; size.textContent = fmt(g.bytes);
-    const num = document.createElement('span'); num.className = 'num'; num.textContent = g.n.toLocaleString() + ' messages';
-    size.appendChild(num);
-    li.append(who, size);
-    list.appendChild(li);
+  sections.forEach(sec => {
+    const h = document.createElement('li');
+    h.className = 'head'; h.textContent = sec.title;
+    list.appendChild(h);
+    sec.rows.forEach(r => {
+      const li = document.createElement('li');
+      if (r.id) li.dataset.id = r.id;
+      const who = document.createElement('span'); who.className = 'who';
+      who.append(document.createTextNode(r.label));
+      if (r.sub) { const sb = document.createElement('small'); sb.className = 'sub'; sb.textContent = r.sub; who.appendChild(sb); }
+      const size = document.createElement('span'); size.className = 'size'; size.textContent = fmt(r.bytes);
+      const num = document.createElement('span'); num.className = 'num'; num.textContent = r.num || '';
+      size.appendChild(num);
+      li.append(who, size);
+      list.appendChild(li);
+    });
   });
-  if (!top.length) say('Nothing scanned yet.');
 }
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+async function report() {
+  const all = await everything();
+  if (!all.length) { say('Nothing scanned yet.'); return; }
+  const by = {};
+  all.forEach(m => { const g = by[m.from] || (by[m.from] = { n: 0, bytes: 0 }); g.n++; g.bytes += m.size; });
+  const top = Object.entries(by).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 25);
+  renderSections([{ title: 'Top senders by size', rows: top.map(([from, g]) => ({ label: from, bytes: g.bytes, num: msgs(g.n) })) }]);
+}
+
+// Where is the space? Every message goes into exactly one bucket per breakdown.
+const LABEL_GROUPS = [
+  ['Trash', l => l.includes('TRASH')], ['Spam', l => l.includes('SPAM')], ['Sent', l => l.includes('SENT')],
+  ['Promotions', l => l.includes('CATEGORY_PROMOTIONS')], ['Social', l => l.includes('CATEGORY_SOCIAL')],
+  ['Updates', l => l.includes('CATEGORY_UPDATES')], ['Forums', l => l.includes('CATEGORY_FORUMS')],
+  ['Inbox', l => l.includes('INBOX')], ['Archived (everything else)', () => true]
+];
+const AGE_BUCKETS = [['Over 10 years old', 10], ['5 to 10 years', 5], ['2 to 5 years', 2], ['1 to 2 years', 1], ['Under 1 year', 0]];
+const SIZE_BUCKETS = [['10 MB and up', 1e7], ['1 to 10 MB', 1e6], ['100 KB to 1 MB', 1e5], ['Under 100 KB', 0]];
+
+function tally(all, defs, pick, totalBytes) {
+  const out = defs.map(d => ({ label: d[0], n: 0, bytes: 0 }));
+  all.forEach(m => { const o = out[pick(m)]; o.n++; o.bytes += m.size; });
+  return out.filter(o => o.n).sort((a, b) => b.bytes - a.bytes).map(o => ({
+    label: o.label, bytes: o.bytes,
+    num: `${msgs(o.n)} · ${Math.round(o.bytes / totalBytes * 100)}%`
+  }));
+}
+async function overview() {
+  const all = await everything();
+  if (!all.length) { say('Nothing scanned yet.'); return; }
+  const total = all.reduce((t, m) => t + m.size, 0), now = Date.now();
+  const years = m => (now - m.date) / (365.25 * 864e5);
+  renderSections([
+    { title: 'Everything scanned', rows: [{ label: 'All messages', bytes: total, num: msgs(all.length) }] },
+    { title: 'By type', rows: tally(all, LABEL_GROUPS, m => LABEL_GROUPS.findIndex(g => g[1](m.labels)), total) },
+    { title: 'By age', rows: tally(all, AGE_BUCKETS, m => AGE_BUCKETS.findIndex(b => years(m) >= b[1]), total) },
+    { title: 'By message size', rows: tally(all, SIZE_BUCKETS, m => SIZE_BUCKETS.findIndex(b => m.size >= b[1]), total) }
+  ]);
+}
+
+async function biggest() {
+  const all = (await everything()).sort((a, b) => b.size - a.size).slice(0, 25);
+  if (!all.length) { say('Nothing scanned yet.'); return; }
+  const when = m => new Date(m.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  renderSections([{ title: 'Biggest messages', rows: all.map(m => ({
+    id: m.id, label: m.from, sub: when(m) + (m.labels.includes('SENT') ? ' · sent' : ''), bytes: m.size })) }]);
+  if (!token) { say('Connect Gmail to also see subject lines.'); return; }
+  say('Loading subject lines…');
+  for (const m of all) {
+    try {
+      const r = await api(`/messages/${m.id}?format=metadata&metadataHeaders=Subject&fields=payload/headers`);
+      const subj = r.payload && r.payload.headers && r.payload.headers[0] && r.payload.headers[0].value;
+      const row = document.querySelector(`#list li[data-id="${m.id}"] .who`);
+      if (row && subj) {
+        row.firstChild.textContent = subj;
+        row.querySelector('.sub').textContent = m.from + ' · ' + when(m) + (m.labels.includes('SENT') ? ' · sent' : '');
+      }
+    } catch (e) { if (e.message === 'expired') { say('Session expired. Tap Connect Gmail to load subject lines.', true); return; } }
+  }
+  say('');
+}
+
 $('connect').onclick = connect;
 $('scan').onclick = scan;
 $('stop').onclick = () => { running = false; };
 $('report').onclick = report;
+$('overview').onclick = overview;
+$('biggest').onclick = biggest;
 countMsgs().then(n => { if (n) { done = n; $('counts').textContent = `${n.toLocaleString()} messages saved from an earlier scan`; } });
 </script>
 </body>
