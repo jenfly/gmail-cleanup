@@ -50,6 +50,7 @@
   <div class="row">
     <button id="connect" class="primary">Connect Gmail</button>
     <button id="scan" disabled>Start scan</button>
+    <button id="sync" disabled>Sync with Gmail</button>
     <button id="stop" disabled>Pause</button>
     <button id="report">Top senders</button>
     <button id="overview">Where's the space?</button>
@@ -102,7 +103,7 @@ const msgs = n => n.toLocaleString() + (n === 1 ? ' message' : ' messages');
 const fmt = b => b >= 1e9 ? (b/1e9).toFixed(2)+' GB' : b >= 1e6 ? (b/1e6).toFixed(1)+' MB' : Math.round(b/1e3)+' KB';
 
 let token = null, running = false, total = 0, done = 0, scanStart = 0, doneAtStart = 0;
-let needsReconnect = false, scanGen = 0, skipped = 0, badStreak = 0;
+let needsReconnect = false, scanGen = 0, skipped = 0, badStreak = 0, syncing = false, resumeFn = null;
 
 /* ---------- IndexedDB ---------- */
 const dbp = new Promise((res, rej) => {
@@ -141,6 +142,7 @@ async function missing(ids) {
 function needReconnect() {
   needsReconnect = true;
   token = null;
+  $('sync').disabled = true;
   $('connect').textContent = 'Reconnect & resume';
   say('Paused: your Gmail session expired (they last about an hour). Tap "Reconnect & resume" to carry on where you left off. Nothing was lost.', true);
 }
@@ -156,7 +158,8 @@ function connect() {
       needsReconnect = false;
       $('connect').textContent = 'Connect Gmail';
       $('scan').disabled = false;
-      if (resume) scan(); // came here because the session expired: carry on automatically
+      $('sync').disabled = false;
+      if (resume) (resumeFn || scan)(); // came here because the session expired: carry on automatically
       else say('Connected. Tap Start scan. Sessions last about an hour.');
     }
   });
@@ -267,16 +270,22 @@ function parseSender(headers) {
   const m = v.match(/<([^>]+)>/);
   return (m ? m[1] : v).trim().toLowerCase();
 }
-async function scan() {
+async function scan(opts = {}) {
+  resumeFn = () => scan(opts);
   scanGen++;
   skipped = 0; badStreak = 0;
   running = true;
   keepAwake(true);
-  $('scan').disabled = true; $('stop').disabled = false;
+  $('scan').disabled = true; $('sync').disabled = true; $('stop').disabled = false;
   try {
-    total = (await api('/profile')).messagesTotal;
+    const prof = await api('/profile');
+    total = prof.messagesTotal;
+    const startHist = prof.historyId; // changes after this point are caught by the next sync
+    if (opts.fresh) await setMeta('scan', {});
     const meta = (await getMeta('scan')) || {};
-    let page = meta.pageToken;
+    let page = opts.fresh ? undefined : meta.pageToken;
+    let fullPass = !page; // listing from the very start, so we can tell what no longer exists
+    const live = new Set();
     done = await countMsgs();
     scanStart = Date.now(); doneAtStart = done;
     progress(); say('Scanning…');
@@ -286,9 +295,10 @@ async function scan() {
         list = await api('/messages?maxResults=500&includeSpamTrash=true' + (page ? '&pageToken=' + page : ''));
       } catch (e) {
         // A saved page token can go stale; start the listing over (already-saved messages are skipped quickly).
-        if (e.status === 400 && page) { page = undefined; await setMeta('scan', {}); continue; }
+        if (e.status === 400 && page) { page = undefined; fullPass = true; live.clear(); await setMeta('scan', {}); continue; }
         throw e;
       }
+      (list.messages || []).forEach(m => live.add(m.id));
       const todo = await missing((list.messages || []).map(m => m.id));
       const rows = [];
       try {
@@ -319,8 +329,9 @@ async function scan() {
       page = list.nextPageToken;
       await setMeta('scan', { pageToken: page });
       if (!page) {
+        const note = fullPass ? await finishFullPass(live, startHist) : '';
         const bad = await countBad();
-        say('Scan complete.' + (bad ? ` Gmail wouldn't return ${bad} message${bad > 1 ? 's' : ''}, so they were skipped.` : '') + ' Run it again anytime to pick up new mail.');
+        say('Scan complete.' + note + (bad ? ` Gmail wouldn't return ${bad} message${bad > 1 ? 's' : ''}, so they were skipped.` : '') + ' Run it again anytime to pick up new mail.');
         break;
       }
     }
@@ -333,6 +344,134 @@ async function scan() {
   keepAwake(false);
   $('stop').disabled = true;
   $('scan').disabled = needsReconnect; // can't scan again until we have a fresh token
+  $('sync').disabled = needsReconnect;
+}
+
+/* ---------- Sync with Gmail ---------- */
+const deleteMany = ids => run('msgs', 'readwrite', st => { ids.forEach(id => st.delete(id)); });
+async function eachLimit(items, n, fn) {
+  let i = 0, failed = false;
+  await Promise.all(Array.from({ length: n }, async () => {
+    while (!failed && i < items.length) {
+      try { await fn(items[i++]); } catch (e) { failed = true; throw e; }
+    }
+  }));
+}
+async function listIds(labelId) {
+  const ids = new Set();
+  let page;
+  do {
+    const r = await api(`/messages?labelIds=${labelId}&maxResults=500&includeSpamTrash=true` + (page ? '&pageToken=' + page : ''));
+    (r.messages || []).forEach(m => ids.add(m.id));
+    page = r.nextPageToken;
+  } while (page);
+  return ids;
+}
+// Make the cached Trash flag match Gmail (covers things trashed while we weren't watching).
+async function refreshTrash() {
+  const trash = await listIds('TRASH');
+  const all = await run('msgs', 'readonly', st => st.getAll());
+  const changed = [];
+  all.forEach(m => {
+    const has = m.labels.includes('TRASH'), want = trash.has(m.id);
+    if (want && !has) { m.labels.push('TRASH'); changed.push(m); }
+    else if (!want && has) { m.labels = m.labels.filter(l => l !== 'TRASH'); changed.push(m); }
+  });
+  if (changed.length) await putMany(changed);
+}
+// After a scan that listed every message from the start: forget what Gmail no longer has,
+// refresh Trash flags, and remember where Gmail's change history stood when we began.
+async function finishFullPass(live, startHist) {
+  const keys = await run('msgs', 'readonly', st => st.getAllKeys());
+  const gone = keys.filter(k => !live.has(k));
+  let note = '';
+  if (gone.length && live.size < keys.length * 0.5) {
+    note = ' Skipped removing old entries because Gmail listed far fewer messages than expected.';
+  } else if (gone.length) {
+    await deleteMany(gone);
+    note = ` Dropped ${msgs(gone.length)} that no longer exist in Gmail.`;
+  }
+  await refreshTrash();
+  await setMeta('history', { id: startHist, at: Date.now() });
+  done = await countMsgs(); progress();
+  return note;
+}
+
+async function fetchRow(id) {
+  try {
+    const m = await api(`/messages/${id}?format=metadata&metadataHeaders=From&fields=id,sizeEstimate,internalDate,labelIds,payload/headers`);
+    return { id: m.id, from: parseSender(m.payload && m.payload.headers), date: +m.internalDate, size: m.sizeEstimate, labels: m.labelIds || [] };
+  } catch (e) {
+    if (e.status === 404) return null; // deleted since the history entry
+    if (e.status === 400) return { id, from: '(unreadable)', date: 0, size: 0, labels: [], bad: 400 };
+    throw e;
+  }
+}
+
+// Ask Gmail what changed since startId and apply it to the local copy.
+async function syncHistory(startId) {
+  const records = [];
+  let page, latest = startId;
+  do {
+    const r = await api(`/history?startHistoryId=${startId}&maxResults=500&historyTypes=messageAdded&historyTypes=messageDeleted&historyTypes=labelAdded&historyTypes=labelRemoved` + (page ? '&pageToken=' + page : ''));
+    if (r.historyId) latest = r.historyId;
+    (r.history || []).forEach(h => records.push(h));
+    page = r.nextPageToken;
+  } while (page);
+
+  const byId = new Map((await run('msgs', 'readonly', st => st.getAll())).map(m => [m.id, m]));
+  const fresh = new Set(), gone = new Set(), dirty = new Map();
+  const touch = (x, change) => {
+    const row = byId.get(x.message.id);
+    if (!row || gone.has(row.id)) return; // not cached (new messages are fetched whole below)
+    change(row, x.labelIds || []);
+    dirty.set(row.id, row);
+  };
+  records.forEach(h => {          // oldest first, so the final state wins
+    (h.messagesAdded || []).forEach(x => { gone.delete(x.message.id); if (!byId.has(x.message.id)) fresh.add(x.message.id); });
+    (h.messagesDeleted || []).forEach(x => { gone.add(x.message.id); fresh.delete(x.message.id); });
+    (h.labelsAdded || []).forEach(x => touch(x, (row, ls) => ls.forEach(l => { if (!row.labels.includes(l)) row.labels.push(l); })));
+    (h.labelsRemoved || []).forEach(x => touch(x, (row, ls) => { row.labels = row.labels.filter(l => !ls.includes(l)); }));
+  });
+
+  const added = [];
+  await eachLimit([...fresh], 6, async id => { const row = await fetchRow(id); if (row) added.push(row); });
+  const removed = [...gone].filter(id => byId.has(id));
+  gone.forEach(id => dirty.delete(id));
+  if (removed.length) await deleteMany(removed);
+  await putMany([...dirty.values(), ...added]);
+  await setMeta('history', { id: latest, at: Date.now() });
+  return { added: added.length, removed: removed.length, relabelled: dirty.size };
+}
+
+async function sync() {
+  if (running || syncing) return;
+  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  syncing = true; resumeFn = sync;
+  $('sync').disabled = true; $('scan').disabled = true;
+  try {
+    const h = await getMeta('history');
+    if (h && h.id) {
+      say('Checking Gmail for changes…');
+      try {
+        const r = await syncHistory(h.id);
+        say(`Synced. ${msgs(r.added)} new, ${r.removed} removed, labels changed on ${msgs(r.relabelled)}.`);
+        return;
+      } catch (e) {
+        if (e.status !== 404) throw e;
+        say('Gmail no longer keeps change history that far back. Doing a full check instead…');
+      }
+    } else say('First sync: comparing everything with Gmail. This takes a few minutes…');
+    syncing = false;
+    await scan({ fresh: true });
+  } catch (e) {
+    if (e.message === 'expired') needReconnect();
+    else say('Sync stopped: ' + e.message, true);
+  } finally {
+    syncing = false;
+    $('scan').disabled = needsReconnect; $('sync').disabled = needsReconnect;
+    if (!$('filter').hidden) { reviewRows = await everything(); updateMatch(); } // keep the open review panel current
+  }
 }
 
 /* ---------- Report ---------- */
@@ -515,7 +654,8 @@ async function removeLabel() {
 }
 
 $('connect').onclick = connect;
-$('scan').onclick = scan;
+$('scan').onclick = () => scan();
+$('sync').onclick = sync;
 $('stop').onclick = () => { running = false; };
 $('report').onclick = report;
 $('overview').onclick = overview;
