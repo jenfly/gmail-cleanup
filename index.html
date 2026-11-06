@@ -13,13 +13,17 @@
   :root { --bg:#eef2f4; --ink:#14232b; --muted:#5b6b73; --line:#cfd8dd; --accent:#1f6f5c; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,sans-serif; }
-  main { max-width:680px; margin:0 auto; padding:calc(92px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(92px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
+  main { max-width:680px; margin:0 auto; padding:calc(72px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(150px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
   h1 { font-size:1.45rem; margin:0; }
   h2 { font-size:1.1rem; margin:0 0 10px; scroll-margin-top:100px; }
   #topbar { position:fixed; z-index:5; top:0; left:0; right:0; background:var(--bg); border-bottom:1px solid var(--line); padding: max(8px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
   #topinner { max-width:680px; margin:auto; }
-  #status { color:var(--muted); margin:2px 0 0; min-height:1.35em; font-size:.9rem; }
+  #status { display:none; color:var(--muted); margin:2px 0 0; min-height:1.35em; font-size:.9rem; }
+  body[data-tab="data"] #status, body.status-attention #status { display:block; }
   #status.alert { color:var(--ink); font-weight:650; }
+  #connectedLabel { display:none; color:var(--muted); font-weight:600; padding:10px 0; }
+  #connect.connected { display:none; }
+  #connectedLabel.visible { display:block; }
   .bar { height:8px; background:var(--line); border-radius:5px; overflow:hidden; margin-top:8px; }
   #fill { height:100%; width:0; background:var(--accent); transition:width .3s; }
   #counts { margin:5px 0 0; font-size:.85rem; font-variant-numeric:tabular-nums; }
@@ -59,10 +63,26 @@
   #pageNumber { width:64px; min-height:44px; margin:0; text-align:center; }
   #showing { font-size:.88rem; font-weight:650; margin:18px 0 4px; font-variant-numeric:tabular-nums; }
   #selectionSummary { font-weight:650; margin:10px 0; }
-  #actions { position:sticky; bottom:72px; background:var(--bg); border-top:1px solid var(--line); padding:10px 0 4px; }
-  #actions .row { margin:6px 0; }
-  #actions button { flex:1 1 42%; }
+  #actions { position:fixed; z-index:5; left:0; right:0; bottom:calc(64px + env(safe-area-inset-bottom)); background:var(--bg); border-top:1px solid var(--line); padding:8px max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
+  #actionInner { max-width:648px; margin:0 auto; display:flex; gap:8px; }
+  #trashSelected { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #moreActions { position:relative; flex:none; width:48px; min-width:48px; height:48px; padding:0; font-size:1.4rem; }
+  #moreMenu { position:absolute; right:0; bottom:54px; width:min(290px,calc(100vw - 32px)); padding:12px; background:var(--bg); border:1px solid var(--line); border-radius:10px; box-shadow:0 4px 18px #14232b22; }
+  #moreMenu[hidden] { display:none; }
+  #moreMenu button { width:100%; margin-top:8px; }
+  #optional { margin-top:10px; }
   #optional label { display:block; margin-top:8px; color:var(--muted); }
+  #reviewTab { padding-bottom:132px; }
+  #reviewListPanel { padding-bottom:10px; }
+  #reviewFilters summary { list-style:none; }
+  #reviewFilters summary::-webkit-details-marker { display:none; }
+  #typeChips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .type-chip { display:flex; align-items:center; gap:7px; min-height:42px; padding:7px 10px; border:1px solid var(--line); border-radius:22px; background:#fff; color:var(--ink); font-size:.9rem; }
+  .type-chip input { width:18px; height:18px; min-height:18px; margin:0; accent-color:var(--accent); }
+  #selectionSummary { margin:6px 0 12px; }
+  #showing { margin:18px 0 4px; }
+  #pagination { margin-top:4px; }
+  #reviewTab > .panel { margin-bottom:10px; }
   #tabs { position:fixed; z-index:6; bottom:0; left:0; right:0; display:grid; grid-template-columns:repeat(3,1fr); gap:4px; padding:7px max(10px,env(safe-area-inset-right)) max(7px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left)); background:var(--bg); border-top:1px solid var(--line); }
   #tabs button { border:0; min-height:50px; padding:7px 4px; font-size:.9rem; }
   #tabs button[aria-current="page"] { background:var(--ink); color:#fff; }
@@ -79,6 +99,7 @@
     <div class="panel">
       <h2 id="dataHeading">Gmail data</h2>
       <button id="connect" class="primary">Connect Gmail</button>
+      <div id="connectedLabel" aria-live="polite">Connected</div>
       <button id="dataAction" disabled>Scan Gmail</button>
       <button id="pause" disabled>Pause</button>
       <div class="bar"><div id="fill"></div></div>
@@ -108,21 +129,27 @@
             <label>Age from (years) <input id="fAgeFrom" type="number" min="0" step="0.5" inputmode="decimal" placeholder="No minimum"></label>
             <label>Age to (years) <input id="fAgeTo" type="number" min="0" step="0.5" inputmode="decimal" placeholder="No maximum"></label>
           </div>
-          <label>Type<select id="fType">
-            <option value="any">Any</option><option value="sent">Sent</option><option value="notsent">Everything except Sent</option>
-            <option value="promotions">Promotions</option><option value="social">Social</option><option value="updates">Updates</option><option value="forums">Forums</option><option value="auto">All four categories</option>
-            <option value="inbox">Inbox</option><option value="spam">Spam</option><option value="archived">Archived</option>
-          </select></label>
+          <div class="field"><label>Type (select any combination)</label>
+            <div id="typeChips" role="group" aria-label="Message types">
+              <label class="type-chip"><input type="checkbox" data-type="sent"> Sent</label>
+              <label class="type-chip"><input type="checkbox" data-type="notsent"> Everything except Sent</label>
+              <label class="type-chip"><input type="checkbox" data-type="promotions"> Promotions</label>
+              <label class="type-chip"><input type="checkbox" data-type="social"> Social</label>
+              <label class="type-chip"><input type="checkbox" data-type="updates"> Updates</label>
+              <label class="type-chip"><input type="checkbox" data-type="forums"> Forums</label>
+              <label class="type-chip"><input type="checkbox" data-type="inbox"> Inbox</label>
+              <label class="type-chip"><input type="checkbox" data-type="archived"> Archived</label>
+            </div>
+          </div>
           <div class="row"><button id="clearFilters">Clear filters</button></div>
         </div>
       </details>
-      <p id="fMatch" class="summary">No messages loaded yet.</p>
     </div>
-    <div class="panel">
+    <div class="panel" id="reviewListPanel">
       <div class="checkrow"><input id="selectAll" type="checkbox" aria-label="Select all matching messages"><label for="selectAll"><strong>Select all matches</strong></label></div>
       <p id="selectionSummary">0 selected</p>
-      <p id="showing">Showing 0–0 of 0</p>
       <ul id="matches" aria-live="polite"><li class="empty">Open Review to load your messages.</li></ul>
+      <p id="showing">Showing 0–0 of 0</p>
       <nav id="pagination" aria-label="Review pages">
         <button id="prevPage" disabled>← Previous</button>
         <label id="pageJump">Page <input id="pageNumber" type="number" min="1" value="1" inputmode="numeric" aria-label="Go to page"> <span id="pageTotal">of 1</span></label>
@@ -130,13 +157,18 @@
       </nav>
     </div>
     <div id="actions">
-      <div class="row"><button id="trashSelected" class="danger" disabled>Trash selected</button><button id="undoTrash">Undo last trash</button></div>
-      <p id="tInfo" class="hint"></p>
-      <details id="optional" class="panel">
-        <summary>Optional: add a Gmail label to selected messages</summary>
-        <label>Label name <input id="fLabel" type="text" value="Sweeper review"></label>
-        <div class="row"><button id="applyLabel">Apply label to selected</button></div>
-      </details>
+      <div id="actionInner">
+        <button id="trashSelected" class="danger" disabled>Trash 0</button>
+        <button id="moreActions" aria-label="More actions" aria-expanded="false" aria-controls="moreMenu">⋯</button>
+      </div>
+      <div id="moreMenu" hidden>
+        <button id="undoTrash">Undo last trash</button>
+        <details id="optional">
+          <summary>Add Gmail label…</summary>
+          <label>Label name <input id="fLabel" type="text" value="Sweeper review"></label>
+          <button id="applyLabel">Apply label to selected</button>
+        </details>
+      </div>
     </div>
   </section>
 </main>
@@ -161,11 +193,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const say = (t, alert = false) => {
   $('status').textContent = t;
   $('status').classList.toggle('alert', alert);
+  const attention = alert || running || syncing;
+  document.body.classList.toggle('status-attention', attention);
 };
+function updateStatusVisibility() {
+  document.body.dataset.tab = activeTab;
+  document.body.classList.toggle('status-attention', !!(running || syncing || $('status').classList.contains('alert')));
+}
 // Messages from background retries must never overwrite a final status like "Paused" or "Session expired".
 const sayIfRunning = t => { if (running) say(t); };
 const msgs = n => n.toLocaleString() + (n === 1 ? ' message' : ' messages');
-const fmt = b => b >= 1e9 ? (b/1e9).toFixed(2)+' GB' : b >= 1e6 ? (b/1e6).toFixed(1)+' MB' : Math.round(b/1e3)+' KB';
+const fmt = b => b >= 1024**3 ? (b/1024**3).toFixed(2)+' GB' : b >= 1024**2 ? (b/1024**2).toFixed(1)+' MB' : b >= 1024 ? Math.round(b/1024)+' KB' : Math.round(b)+' B';
 
 let token = null, running = false, total = 0, done = 0, scanStart = 0, doneAtStart = 0;
 let needsReconnect = false, scanGen = 0, skipped = 0, badStreak = 0, syncing = false, resumeFn = null;
@@ -207,6 +245,7 @@ async function missing(ids) {
 function expireForAction() {
   token = null; needsReconnect = false;
   $('connect').textContent = 'Reconnect Gmail';
+  $('connect').classList.remove('connected'); $('connectedLabel').classList.remove('visible');
   $('dataAction').disabled = true;
   say('Your Gmail session expired. Tap Reconnect Gmail, then retry the action. Check Gmail first if a bulk action was interrupted.', true);
 }
@@ -216,6 +255,7 @@ function needReconnect() {
   $('dataAction').disabled = true;
   $('pause').disabled = true;
   $('connect').textContent = 'Reconnect & resume';
+  $('connect').classList.remove('connected'); $('connectedLabel').classList.remove('visible');
   say('Paused: your Gmail session expired (they last about an hour). Tap "Reconnect & resume" to carry on where you left off. Nothing was lost.', true);
 }
 function connect() {
@@ -229,6 +269,7 @@ function connect() {
       const resume = needsReconnect;
       needsReconnect = false;
       $('connect').textContent = 'Connect Gmail';
+      $('connect').classList.add('connected'); $('connectedLabel').classList.add('visible');
       updateDataAction();
       if (resume) (resumeFn || scan)(); // came here because the session expired: carry on automatically
       else say('Connected. Choose Scan Gmail to begin. Sessions last about an hour.');
@@ -346,6 +387,7 @@ async function scan(opts = {}) {
   scanGen++;
   skipped = 0; badStreak = 0;
   running = true;
+  updateStatusVisibility();
   keepAwake(true);
   $('dataAction').disabled = true; $('pause').disabled = false;
   try {
@@ -414,6 +456,7 @@ async function scan(opts = {}) {
   running = false;
   keepAwake(false);
   $('pause').disabled = true;
+  updateStatusVisibility();
   if (activeTab === 'review') await refreshReview();
   await updateDataAction();
 }
@@ -518,7 +561,7 @@ async function syncHistory(startId) {
 async function sync() {
   if (running || syncing) return;
   if (!token) { say('Tap Connect Gmail first.', true); return; }
-  syncing = true; resumeFn = sync;
+  syncing = true; resumeFn = sync; updateStatusVisibility();
   $('dataAction').disabled = true;
   try {
     const h = await getMeta('history');
@@ -541,6 +584,7 @@ async function sync() {
   } finally {
     syncing = false;
     $('dataAction').disabled = needsReconnect;
+    updateStatusVisibility();
     if (activeTab === 'review') await refreshReview(); // keep the open review tab current
     await updateDataAction();
   }
@@ -551,31 +595,38 @@ const everything = async () => (await run('msgs', 'readonly', st => st.getAll())
 const when = m => new Date(m.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 const AUTO = ['CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS', 'CATEGORY_SOCIAL'];
 const TYPE_TESTS = {
-  any: () => true,
-  sent: l => !l.includes('TRASH') && !l.includes('SPAM') && l.includes('SENT'),
+  sent: l => l.includes('SENT'),
   notsent: l => !l.includes('SENT'),
-  promotions: l => !['TRASH','SPAM','SENT'].some(c=>l.includes(c)) && l.includes('CATEGORY_PROMOTIONS'),
-  social: l => !['TRASH','SPAM','SENT','CATEGORY_PROMOTIONS'].some(c=>l.includes(c)) && l.includes('CATEGORY_SOCIAL'),
-  updates: l => !['TRASH','SPAM','SENT','CATEGORY_PROMOTIONS','CATEGORY_SOCIAL'].some(c=>l.includes(c)) && l.includes('CATEGORY_UPDATES'),
-  forums: l => !['TRASH','SPAM','SENT','CATEGORY_PROMOTIONS','CATEGORY_SOCIAL','CATEGORY_UPDATES'].some(c=>l.includes(c)) && l.includes('CATEGORY_FORUMS'),
-  auto: l => AUTO.some(c => l.includes(c)),
-  inbox: l => !['TRASH','SPAM','SENT',...AUTO].some(c=>l.includes(c)) && l.includes('INBOX'),
-  spam: l => !l.includes('TRASH') && l.includes('SPAM'),
-  archived: l => !['TRASH','SPAM','SENT','INBOX',...AUTO].some(c => l.includes(c))
+  promotions: l => l.includes('CATEGORY_PROMOTIONS'),
+  social: l => l.includes('CATEGORY_SOCIAL'),
+  updates: l => l.includes('CATEGORY_UPDATES'),
+  forums: l => l.includes('CATEGORY_FORUMS'),
+  inbox: l => l.includes('INBOX'),
+  archived: l => !l.includes('INBOX') && !l.includes('SENT') && !AUTO.some(c=>l.includes(c))
 };
+const REVIEW_TYPES = Object.keys(TYPE_TESTS);
 let reviewRows = [], matchRows = [], excluded = new Set(), reviewPage = 1;
 let activeTab = 'data', exploreMode = 'space', subjectCache = new Map(), renderGeneration = 0;
+let reviewVisited = false, reviewEntryFromExplore = false;
 const PAGE_SIZE = 25;
 
 function switchTab(name) {
+  const previous = activeTab;
   activeTab = name;
+  document.body.dataset.tab = name;
+  if (name === 'review') {
+    if (reviewEntryFromExplore) $('reviewFilters').open = false;
+    else if (!reviewVisited) $('reviewFilters').open = true;
+    reviewVisited = true;
+    reviewEntryFromExplore = false;
+  }
   window.scrollTo(0,0);
   ['data','explore','review'].forEach(tab => {
     $(tab + 'Tab').classList.toggle('active', tab === name);
-    $('tab' + tab[0].toUpperCase() + tab.slice(1)).toggleAttribute('aria-current', tab === name);
-    if (tab === name) $('tab' + tab[0].toUpperCase() + tab.slice(1)).setAttribute('aria-current','page');
-    else $('tab' + tab[0].toUpperCase() + tab.slice(1)).removeAttribute('aria-current');
+    const button = $('tab' + tab[0].toUpperCase() + tab.slice(1));
+    if (tab === name) button.setAttribute('aria-current','page'); else button.removeAttribute('aria-current');
   });
+  updateStatusVisibility();
   if (name === 'review') refreshReview();
   if (name === 'explore') renderExplore();
   if (name === 'data') updateDataAction();
@@ -593,7 +644,7 @@ function renderResultRows(rows) {
   rows.forEach(r => {
     const li=document.createElement('li');
     if (r.header) { li.className='sectionHeader'; li.textContent=r.label; list.append(li); return; }
-    if (r.disabled) { li.className='disabled'; const label=document.createElement('span');label.textContent=r.label;const note=document.createElement('span');note.className='size';note.textContent=r.num||'';li.append(label,note);list.append(li);return; }
+    if (r.disabled) { li.className='disabled'; const label=document.createElement('span');label.className='who';label.textContent=r.label;const size=document.createElement('span');size.className='size';size.textContent=fmt(r.bytes);const note=document.createElement('small');note.className='sub';note.textContent=r.num||'';size.append(note);li.append(label,size);list.append(li);return; }
     li.tabIndex=0; li.setAttribute('role','button');
     const who=document.createElement('span'); who.className='who'; who.textContent=r.label;
     if (r.sub) { const sub=document.createElement('small'); sub.className='sub'; sub.textContent=r.sub; who.append(sub); }
@@ -609,7 +660,7 @@ function yearsOld(m, now=Date.now()) { return Math.max(0,(now-m.date)/(365.25*86
 function renderSpace(all) {
   const total=all.reduce((n,m)=>n+m.size,0), now=Date.now();
   const defs=[
-    {title:'By type',items:[['Sent','sent'],['Promotions','promotions'],['Social','social'],['Updates','updates'],['Forums','forums'],['Inbox','inbox'],['Spam','spam'],['Archived','archived'],['Trash','trash']]},
+    {title:'By type',items:[['Sent','sent'],['Promotions','promotions'],['Social','social'],['Updates','updates'],['Forums','forums'],['Inbox','inbox'],['Archived','archived'],['Spam','spam'],['Trash','trash']]},
     {title:'By age',items:[['Over 10 years','age10'],['5–10 years','age5'],['2–5 years','age2'],['1–2 years','age1'],['Under 1 year','age0']]},
     {title:'By message size',items:[['10 MB and up','size10'],['1–10 MB','size1'],['100 KB–1 MB','size100k'],['Under 100 KB','size0']]}
   ];
@@ -617,20 +668,26 @@ function renderSpace(all) {
   defs.forEach(section=>{
     const rows=[];
     section.items.forEach(([label,key])=>{
-      const filter={};
-      let subset=[];
-      if(key==='sent'||key==='promotions'||key==='social'||key==='updates'||key==='forums'||key==='inbox'||key==='spam'||key==='archived') {
-        filter.type=key; subset=all.filter(m=>key==='archived' ? TYPE_TESTS.archived(m.labels) : TYPE_TESTS[key](m.labels));
-      } else if(key==='trash') { subset=all.filter(m=>m.labels.includes('TRASH')); }
+      const filter={}; let subset=[];
+      if(REVIEW_TYPES.includes(key)) {
+        filter.type=[key];
+        subset=all.filter(m=>!m.labels.includes('TRASH')&&!m.labels.includes('SPAM')&&TYPE_TESTS[key](m.labels));
+      } else if(key==='spam') { subset=all.filter(m=>m.labels.includes('SPAM')&&!m.labels.includes('TRASH')); }
+      else if(key==='trash') { subset=all.filter(m=>m.labels.includes('TRASH')); }
       else if(key.startsWith('age')) {
         const n=Number(key.slice(3)); filter.ageFrom=n===0?0:n; filter.ageTo=n===10?null:n===5?10:n===2?5:n===1?2:1;
-        subset=all.filter(m=>yearsOld(m,now)>=filter.ageFrom && (filter.ageTo==null||yearsOld(m,now)<filter.ageTo));
+        subset=all.filter(m=>!m.labels.includes('TRASH')&&!m.labels.includes('SPAM')&&yearsOld(m,now)>=filter.ageFrom&&(filter.ageTo==null||yearsOld(m,now)<filter.ageTo));
       } else {
-        const ranges={size10:[10,null],size1:[1,10],size100k:[.1,1],size0:[0,.1]};
-        [filter.sizeFrom,filter.sizeTo]=ranges[key]; subset=all.filter(m=>m.size/1e6>=filter.sizeFrom&&(filter.sizeTo==null||m.size/1e6<filter.sizeTo));
+        const hundredKB=100/1024; const ranges={size10:[10,null],size1:[1,10],size100k:[hundredKB,1],size0:[0,hundredKB]};
+        [filter.sizeFrom,filter.sizeTo]=ranges[key];
+        subset=all.filter(m=>!m.labels.includes('TRASH')&&!m.labels.includes('SPAM')&&m.size/1024**2>=filter.sizeFrom&&(filter.sizeTo==null||m.size/1024**2<filter.sizeTo));
       }
-      if(subset.length) rows.push({label,bytes:subset.reduce((n,m)=>n+m.size,0),num:key==='trash'?'Already in Trash':`${msgs(subset.length)} · ${total?Math.round(subset.reduce((n,m)=>n+m.size,0)/total*100):0}%`,filter:key==='trash'?null:filter,disabled:key==='trash'});
+      if(subset.length) {
+        const bytes=subset.reduce((n,m)=>n+m.size,0);
+        rows.push({label,bytes,num:`${msgs(subset.length)} · ${total?Math.round(bytes/total*100):0}%`,filter:(key==='trash'||key==='spam')?null:filter,disabled:key==='trash'||key==='spam'});
+      }
     });
+    rows.sort((a,b)=>b.bytes-a.bytes);
     if(rows.length) { out.push({label:section.title,header:true}); out.push(...rows); }
   });
   return out;
@@ -643,7 +700,7 @@ async function renderExplore() {
     const rows=[...by.entries()].sort((a,b)=>b[1].bytes-a[1].bytes).slice(0,25).map(([from,g])=>({label:from,bytes:g.bytes,num:msgs(g.n),filter:{sender:from}}));
     renderResultRows(rows);
   } else if(exploreMode==='biggest') {
-    const rows=[...all].sort((a,b)=>b.size-a.size).slice(0,25).map(m=>({label:m.from,sub:when(m)+(m.labels.includes('SENT')?' · sent':''),bytes:m.size,num:'Open review for this sender',filter:{sender:m.from,sizeFrom:m.size/1e6}}));
+    const rows=[...all].sort((a,b)=>b.size-a.size).slice(0,25).map(m=>({label:m.from,sub:when(m)+(m.labels.includes('SENT')?' · sent':''),bytes:m.size,num:'Open review for this sender',filter:{sender:m.from,sizeFrom:m.size/1024**2}}));
     renderResultRows(rows);
   } else renderResultRows(renderSpace(all));
 }
@@ -654,25 +711,26 @@ function applyExploreFilter(filter) {
   $('fSizeTo').value=filter.sizeTo==null?'':filter.sizeTo;
   $('fAgeFrom').value=filter.ageFrom==null?'':filter.ageFrom;
   $('fAgeTo').value=filter.ageTo==null?'':filter.ageTo;
-  $('fType').value=filter.type||'any';
-  reviewPage=1; recomputeMatches(); $('reviewFilters').open=true;
+  document.querySelectorAll('#typeChips input').forEach(cb=>cb.checked=(filter.type||[]).includes(cb.dataset.type));
+  reviewPage=1; recomputeMatches(); $('reviewFilters').open=false; reviewEntryFromExplore=true;
 }
 
 function filterValues() {
   const number=id=>$(id).value.trim()===''?null:Number($(id).value);
-  return {sender:$('fSender').value.trim().toLowerCase(),sizeFrom:number('fSizeFrom'),sizeTo:number('fSizeTo'),ageFrom:number('fAgeFrom'),ageTo:number('fAgeTo'),type:$('fType').value};
+  return {sender:$('fSender').value.trim().toLowerCase(),sizeFrom:number('fSizeFrom'),sizeTo:number('fSizeTo'),ageFrom:number('fAgeFrom'),ageTo:number('fAgeTo'),type:[...document.querySelectorAll('#typeChips input:checked')].map(cb=>cb.dataset.type)};
 }
 function matching() {
-  const f=filterValues(), now=Date.now(), test=TYPE_TESTS[f.type] || (()=>true);
+  const f=filterValues(), now=Date.now();
+  const typeTest = !f.type.length ? (()=>true) : (l => f.type.some(type => TYPE_TESTS[type](l)));
   return reviewRows.filter(m=>{
-    const size=m.size/1e6, age=yearsOld(m,now);
-    if(m.labels.includes('TRASH')||m.labels.includes('STARRED')) return false;
+    const size=m.size/1024**2, age=yearsOld(m,now);
+    if(m.labels.includes('TRASH')||m.labels.includes('SPAM')||m.labels.includes('STARRED')) return false;
     if(f.sender&&!m.from.toLowerCase().includes(f.sender)) return false;
     if(f.sizeFrom!=null&&size<f.sizeFrom) return false;
     if(f.sizeTo!=null&&size>=f.sizeTo) return false;
     if(f.ageFrom!=null&&age<f.ageFrom) return false;
     if(f.ageTo!=null&&age>=f.ageTo) return false;
-    if(!test(m.labels)) return false;
+    if(!typeTest(m.labels)) return false;
     return true;
   }).sort((a,b)=>b.size-a.size||b.date-a.date);
 }
@@ -681,14 +739,14 @@ function recomputeMatches(reset=true) {
   if(reset) { resetSelection(); reviewPage=1; }
   matchRows=matching();
   const bytes=matchRows.reduce((n,m)=>n+m.size,0);
-  $('fMatch').textContent=matchRows.length?`${msgs(matchRows.length)} · ${fmt(bytes)} match`:'Nothing matches these settings.';
-  $('filterSummary').textContent=matchRows.length?` · ${msgs(matchRows.length)}`:'';
+  $('filterSummary').textContent=` · ${matchRows.length.toLocaleString()} matches · ${fmt(bytes)}`;
   renderReviewPage();
 }
 function selectedRows(){return matchRows.filter(m=>!excluded.has(m.id));}
 function updateSelectionSummary(){
   const selected=selectedRows(), bytes=selected.reduce((n,m)=>n+m.size,0);
   $('selectionSummary').textContent=`${msgs(selected.length)} selected · ${fmt(bytes)}`;
+  $('trashSelected').textContent=`Trash ${selected.length.toLocaleString()}, ${fmt(bytes)}`;
   $('trashSelected').disabled=!selected.length||!token;
   const all=matchRows.length>0&&selected.length===matchRows.length;
   $('selectAll').checked=all; $('selectAll').indeterminate=selected.length>0&&!all;
@@ -711,7 +769,7 @@ function renderReviewPage() {
   const generation=renderGeneration, total=matchRows.length, pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
   reviewPage=Math.min(Math.max(1,reviewPage),pages);
   const start=(reviewPage-1)*PAGE_SIZE, rows=matchRows.slice(start,start+PAGE_SIZE), end=Math.min(start+PAGE_SIZE,total);
-  $('showing').textContent=`Showing ${total?start+1:0}–${end} of ${total.toLocaleString()}`;
+  $('showing').textContent=`Showing ${total?start+1:0} to ${end} of ${total.toLocaleString()}`;
   $('pageNumber').value=reviewPage; $('pageNumber').max=pages; $('pageTotal').textContent=`of ${pages.toLocaleString()}`;
   $('prevPage').disabled=reviewPage<=1; $('nextPage').disabled=reviewPage>=pages;
   const list=$('matches'); list.replaceChildren();
@@ -735,11 +793,13 @@ async function refreshReview() {
   reviewRows=await everything();
   recomputeMatches(false);
   await updateTrashInfo();
+  updateStatusVisibility();
 }
 async function updateTrashInfo() {
   const all=reviewRows.filter(m=>m.labels.includes('TRASH'));
   const log=(await getMeta('trashLog'))||[], last=log[log.length-1];
-  $('tInfo').textContent=`In Trash now: ${msgs(all.length)}, ${fmt(all.reduce((n,m)=>n+m.size,0))}.`+(last?` Last trash run: ${msgs(last.ids.length)} on ${new Date(last.at).toLocaleDateString()}.`:'');
+  // Keep the last-run metadata for undo; no secondary status line in the Review action bar.
+  return {count:all.length,bytes:all.reduce((n,m)=>n+m.size,0),last};
 }
 async function findLabel(name) {
   const r=await api('/labels'); const l=(r.labels||[]).find(x=>x.name.toLowerCase()===name.toLowerCase()); return l?l.id:null;
@@ -805,6 +865,7 @@ async function updateDataAction() {
   $('dataAction').textContent=meta.pageToken?'Resume scan':history&&history.id?'Sync with Gmail':'Scan Gmail';
   $('dataAction').disabled=!token||running||syncing;
   $('pause').disabled=!running;
+  $('connect').classList.toggle('connected',!!token); $('connectedLabel').classList.toggle('visible',!!token);
   $('lastSynced').textContent=history&&history.at?`Last synced ${new Date(history.at).toLocaleString()}.`:'Not synced yet.';
 }
 async function runDataAction() {
@@ -816,6 +877,7 @@ async function runDataAction() {
 async function openReview() { await refreshReview(); }
 
 
+document.body.dataset.tab='data';
 $('connect').onclick = connect;
 $('dataAction').onclick = runDataAction;
 $('pause').onclick = () => { running = false; };
@@ -829,8 +891,16 @@ $('selectAll').onchange = () => { if ($('selectAll').checked) excluded.clear(); 
 $('prevPage').onclick = () => { reviewPage--; renderReviewPage(); $('reviewHeading').scrollIntoView({block:'start',behavior:'smooth'}); };
 $('nextPage').onclick = () => { reviewPage++; renderReviewPage(); $('reviewHeading').scrollIntoView({block:'start',behavior:'smooth'}); };
 $('pageNumber').onchange = () => { const n=Number($('pageNumber').value); if(Number.isInteger(n)&&n>=1&&n<=Math.max(1,Math.ceil(matchRows.length/PAGE_SIZE))){reviewPage=n;renderReviewPage();}else $('pageNumber').value=reviewPage; };
-['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo','fType'].forEach(id => $(id).addEventListener('input',()=>recomputeMatches(true)));
-$('clearFilters').onclick = () => { ['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo'].forEach(id=>$(id).value='');$('fType').value='any';recomputeMatches(true); };
+['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo'].forEach(id => $(id).addEventListener('input',()=>recomputeMatches(true)));
+document.querySelectorAll('#typeChips input').forEach(cb=>cb.addEventListener('change',()=>{
+  const sent=document.querySelector('#typeChips input[data-type=sent]'), notsent=document.querySelector('#typeChips input[data-type=notsent]');
+  if(cb===sent&&sent.checked)notsent.checked=false;
+  if(cb===notsent&&notsent.checked)sent.checked=false;
+  recomputeMatches(true);
+}));
+$('clearFilters').onclick = () => { ['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo'].forEach(id=>$(id).value='');document.querySelectorAll('#typeChips input').forEach(cb=>cb.checked=false);recomputeMatches(true); };
+$('moreActions').onclick = () => { const menu=$('moreMenu'), open=menu.hidden; menu.hidden=!open; $('moreActions').setAttribute('aria-expanded',String(open)); };
+document.addEventListener('click',e=>{if(!$('moreMenu').contains(e.target)&&e.target!==$('moreActions')){$('moreMenu').hidden=true;$('moreActions').setAttribute('aria-expanded','false');}});
 $('trashSelected').onclick = trashSelected;
 $('undoTrash').onclick = undoTrash;
 $('applyLabel').onclick = applyLabel;
