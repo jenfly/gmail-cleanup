@@ -70,7 +70,7 @@ const sayIfRunning = t => { if (running) say(t); };
 const fmt = b => b >= 1e9 ? (b/1e9).toFixed(2)+' GB' : b >= 1e6 ? (b/1e6).toFixed(1)+' MB' : Math.round(b/1e3)+' KB';
 
 let token = null, running = false, total = 0, done = 0, scanStart = 0, doneAtStart = 0;
-let needsReconnect = false, scanGen = 0;
+let needsReconnect = false, scanGen = 0, skipped = 0, badStreak = 0;
 
 /* ---------- IndexedDB ---------- */
 const dbp = new Promise((res, rej) => {
@@ -172,7 +172,10 @@ async function api(path) {
       sayIfRunning(`Gmail asked us to slow down. Waiting ${Math.round(ms / 1000)}s, then continuing…`);
       continue;
     }
-    throw new Error(`HTTP ${r.status}: ${err.message || reason || 'request failed'}`);
+    const e = new Error(`HTTP ${r.status}: ${err.message || reason || 'request failed'}`);
+    e.status = r.status;
+    e.path = path.split('?')[0]; // which call failed, to make errors diagnosable
+    throw e;
   }
   throw new Error('Gave up after repeated network or rate-limit errors. Check your connection, then press Start scan to resume.');
 }
@@ -191,6 +194,20 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------- Scan ---------- */
+async function countBad() {
+  const db = await dbp;
+  return new Promise(res => {
+    let n = 0;
+    const t = db.transaction('msgs');
+    t.objectStore('msgs').openCursor().onsuccess = e => {
+      const c = e.target.result;
+      if (!c) return;
+      if (c.value.bad) n++;
+      c.continue();
+    };
+    t.oncomplete = () => res(n);
+  });
+}
 function progress() {
   $('fill').style.width = total ? Math.min(100, done / total * 100) + '%' : '0';
   let line = `${done.toLocaleString()} of ${total.toLocaleString()} messages scanned`;
@@ -199,6 +216,7 @@ function progress() {
     const min = Math.ceil((total - done) / r / 60);
     line += ` (about ${r.toFixed(0)}/sec, ${min > 90 ? Math.round(min / 60) + ' h' : min + ' min'} left)`;
   }
+  if (skipped) line += `, ${skipped} unreadable`;
   $('counts').textContent = line;
 }
 async function pool(items, n, fn) {
@@ -215,6 +233,7 @@ function parseSender(headers) {
 }
 async function scan() {
   scanGen++;
+  skipped = 0; badStreak = 0;
   running = true;
   keepAwake(true);
   $('scan').disabled = true; $('stop').disabled = false;
@@ -226,12 +245,31 @@ async function scan() {
     scanStart = Date.now(); doneAtStart = done;
     progress(); say('Scanning…');
     while (running) {
-      const list = await api('/messages?maxResults=500&includeSpamTrash=true' + (page ? '&pageToken=' + page : ''));
+      let list;
+      try {
+        list = await api('/messages?maxResults=500&includeSpamTrash=true' + (page ? '&pageToken=' + page : ''));
+      } catch (e) {
+        // A saved page token can go stale; start the listing over (already-saved messages are skipped quickly).
+        if (e.status === 400 && page) { page = undefined; await setMeta('scan', {}); continue; }
+        throw e;
+      }
       const todo = await missing((list.messages || []).map(m => m.id));
       const rows = [];
       try {
         await pool(todo, WORKERS, async id => {
-          const m = await api(`/messages/${id}?format=metadata&metadataHeaders=From&fields=id,sizeEstimate,internalDate,labelIds,payload/headers`);
+          let m;
+          try {
+            m = await api(`/messages/${id}?format=metadata&metadataHeaders=From&fields=id,sizeEstimate,internalDate,labelIds,payload/headers`);
+            badStreak = 0;
+          } catch (e) {
+            // Gmail refuses to return a few messages (400 "Precondition check failed") or they were
+            // deleted since listing (404). Mark them so one bad message can't block the whole scan.
+            if (e.status !== 400 && e.status !== 404) throw e;
+            if (++badStreak > 20) throw e; // 20 in a row means something is really wrong; stop
+            rows.push({ id, from: '(unreadable)', date: 0, size: 0, labels: [], bad: e.status });
+            skipped++; done++;
+            return;
+          }
           rows.push({ id: m.id, from: parseSender(m.payload && m.payload.headers),
                       date: +m.internalDate, size: m.sizeEstimate, labels: m.labelIds || [] });
           done++;
@@ -244,12 +282,16 @@ async function scan() {
       if (!running) break;
       page = list.nextPageToken;
       await setMeta('scan', { pageToken: page });
-      if (!page) { say('Scan complete. Run it again anytime to pick up new mail.'); break; }
+      if (!page) {
+        const bad = await countBad();
+        say('Scan complete.' + (bad ? ` Gmail wouldn't return ${bad} message${bad > 1 ? 's' : ''}, so they were skipped.` : '') + ' Run it again anytime to pick up new mail.');
+        break;
+      }
     }
     if (!running) say('Paused. Start scan resumes where it left off.');
   } catch (e) {
     if (e.message === 'expired') needReconnect();
-    else say('Stopped: ' + e.message, true);
+    else say('Stopped: ' + e.message + (e.path ? ` (${e.path})` : ''), true);
   }
   running = false;
   keepAwake(false);
