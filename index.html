@@ -11,86 +11,140 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root { --bg:#eef2f4; --ink:#14232b; --muted:#5b6b73; --line:#cfd8dd; --accent:#1f6f5c; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, sans-serif; }
-  main { max-width:640px; margin:0 auto; padding:max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(48px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
-  h1 { font-size:1.6rem; margin:0 0 4px; }
-  #status { color:var(--muted); margin:0 0 16px; min-height:1.5em; }
-  #status.alert { color:var(--ink); font-weight:600; }
-  .bar { height:10px; background:var(--line); border-radius:5px; overflow:hidden; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,sans-serif; }
+  main { max-width:680px; margin:0 auto; padding:calc(92px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(92px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
+  h1 { font-size:1.45rem; margin:0; }
+  h2 { font-size:1.1rem; margin:0 0 10px; scroll-margin-top:100px; }
+  #topbar { position:fixed; z-index:5; top:0; left:0; right:0; background:var(--bg); border-bottom:1px solid var(--line); padding: max(8px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
+  #topinner { max-width:680px; margin:auto; }
+  #status { color:var(--muted); margin:2px 0 0; min-height:1.35em; font-size:.9rem; }
+  #status.alert { color:var(--ink); font-weight:650; }
+  .bar { height:8px; background:var(--line); border-radius:5px; overflow:hidden; margin-top:8px; }
   #fill { height:100%; width:0; background:var(--accent); transition:width .3s; }
-  #counts { margin:8px 0 16px; font-variant-numeric:tabular-nums; }
-  .row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:24px; }
-  .row button { flex:1 1 calc(50% - 8px); }
-  button { font:inherit; min-height:48px; padding:10px 14px; touch-action:manipulation; border:1px solid var(--ink); background:transparent; color:var(--ink); border-radius:6px; }
+  #counts { margin:5px 0 0; font-size:.85rem; font-variant-numeric:tabular-nums; }
+  .tab { display:none; }
+  .tab.active { display:block; }
+  .panel { background:rgba(255,255,255,.55); border:1px solid var(--line); border-radius:10px; padding:16px; margin:0 0 16px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0; }
+  button { font:inherit; min-height:48px; padding:10px 14px; touch-action:manipulation; border:1px solid var(--ink); background:transparent; color:var(--ink); border-radius:7px; }
   button.primary { background:var(--ink); color:#fff; }
-  button:disabled { opacity:.4; }
-  button:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
-  #filter { margin:0 0 24px; }
-  #filter h2 { font-size:1.1rem; margin:0 0 4px; }
-  #filter label { display:block; margin:14px 0 0; font-size:.95rem; color:var(--muted); }
-  #filter input, #filter select { display:block; width:100%; min-height:48px; margin-top:4px; padding:8px 12px; font:inherit; font-size:16px; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:6px; }
-  .match { font-weight:600; margin:16px 0 0; min-height:1.5em; }
-  .hint { color:var(--muted); font-size:.9rem; margin:8px 0 0; }
-  #filter h2 + .hint { margin-bottom:4px; }
-  #filter h2:not(:first-child) { margin-top:28px; }
   button.danger { background:#8a2c2c; border-color:#8a2c2c; color:#fff; }
-  #filter .row { margin:16px 0 0; }
-  #list { list-style:none; margin:0; padding:0; }
-  #list li { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
-  .who { word-break:break-word; min-width:0; }
-  .sub { display:block; color:var(--muted); font-size:.85rem; }
-  #list li.head { display:block; font-weight:700; padding:22px 0 8px; border-bottom:2px solid var(--ink); }
-  .size { font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
-  .num { display:block; color:var(--muted); font-size:.85rem; font-weight:400; text-align:right; }
+  button:disabled { opacity:.4; }
+  button:focus-visible,input:focus-visible,select:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  #connect,#dataAction,#pause { width:100%; }
+  #filterFields label,.field label { display:block; color:var(--muted); font-size:.9rem; margin:12px 0 0; }
+  input,select { display:block; width:100%; min-height:48px; margin-top:4px; padding:8px 10px; font:inherit; font-size:16px; color:var(--ink); background:#fff; border:1px solid var(--line); border-radius:6px; }
+  .fieldgrid { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+  .hint,.muted { color:var(--muted); font-size:.9rem; }
+  .summary { font-weight:650; margin:8px 0; font-variant-numeric:tabular-nums; }
+  .segmented { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin:0 0 12px; }
+  .segmented button { padding:8px 5px; font-size:.9rem; min-height:48px; }
+  .segmented button[aria-pressed="true"] { background:var(--ink); color:#fff; }
+  #results,#matches { list-style:none; margin:0; padding:0; }
+  #results li,#matches li { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 2px; border-bottom:1px solid var(--line); }
+  #results li { cursor:pointer; }
+  #results li:focus-visible { outline:3px solid var(--accent); }
+  .who { min-width:0; overflow-wrap:anywhere; }
+  .sub { display:block; color:var(--muted); font-size:.84rem; }
+  .size { flex:none; text-align:right; font-weight:650; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .checkrow { display:flex; align-items:center; gap:10px; min-width:0; flex:1; }
+  .checkrow input[type=checkbox],#selectAll { width:24px; height:24px; min-height:24px; margin:0; flex:none; accent-color:var(--accent); }
+  .matchtext { min-width:0; overflow-wrap:anywhere; }
+  #reviewFilters summary { min-height:44px; display:flex; align-items:center; font-weight:650; cursor:pointer; }
+  #reviewFilters[open] summary { margin-bottom:8px; }
+  #pagination { display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:center; margin:12px 0 4px; }
+  #pagination button { min-width:0; padding:8px; }
+  #pageJump { display:flex; align-items:center; gap:5px; font-size:.9rem; }
+  #pageNumber { width:64px; min-height:44px; margin:0; text-align:center; }
+  #showing { font-size:.88rem; font-weight:650; margin:18px 0 4px; font-variant-numeric:tabular-nums; }
+  #selectionSummary { font-weight:650; margin:10px 0; }
+  #actions { position:sticky; bottom:72px; background:var(--bg); border-top:1px solid var(--line); padding:10px 0 4px; }
+  #actions .row { margin:6px 0; }
+  #actions button { flex:1 1 42%; }
+  #optional label { display:block; margin-top:8px; color:var(--muted); }
+  #tabs { position:fixed; z-index:6; bottom:0; left:0; right:0; display:grid; grid-template-columns:repeat(3,1fr); gap:4px; padding:7px max(10px,env(safe-area-inset-right)) max(7px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left)); background:var(--bg); border-top:1px solid var(--line); }
+  #tabs button { border:0; min-height:50px; padding:7px 4px; font-size:.9rem; }
+  #tabs button[aria-current="page"] { background:var(--ink); color:#fff; }
+  .empty { padding:20px 4px; color:var(--muted); }
+  #results li.sectionHeader { cursor:default; display:block; padding:18px 2px 6px; border-bottom:2px solid var(--ink); font-weight:700; }
+  #results li.disabled { cursor:default; opacity:.65; }
+  @media (max-width:390px) { .segmented button { font-size:.8rem; } #pagination { grid-template-columns:1fr auto 1fr; gap:4px; } #pagination button { font-size:.85rem; } }
 </style>
 </head>
 <body>
+<header id="topbar"><div id="topinner"><h1>Mail sweeper</h1><p id="status">Not connected.</p></div></header>
 <main>
-  <h1>Mail sweeper</h1>
-  <p id="status">Not connected.</p>
-  <div class="bar"><div id="fill"></div></div>
-  <p id="counts"></p>
-  <div class="row">
-    <button id="connect" class="primary">Connect Gmail</button>
-    <button id="scan" disabled>Start scan</button>
-    <button id="sync" disabled>Sync with Gmail</button>
-    <button id="stop" disabled>Pause</button>
-    <button id="report">Top senders</button>
-    <button id="overview">Where's the space?</button>
-    <button id="biggest">Biggest messages</button>
-    <button id="review">Review &amp; label</button>
-  </div>
-  <section id="filter" hidden>
-    <h2>Review filter</h2>
-    <label>Larger than (MB) <input id="fSize" type="number" min="0" step="0.5" value="1" inputmode="decimal"></label>
-    <label>Older than (years) <input id="fAge" type="number" min="0" step="1" value="5" inputmode="numeric"></label>
-    <label>Type
-      <select id="fType">
-        <option value="any">Any</option>
-        <option value="sent">Sent only</option>
-        <option value="notsent">Everything except Sent</option>
-        <option value="auto">Promotions, Updates, Forums, Social</option>
-      </select>
-    </label>
-    <p id="fMatch" class="match"></p>
-    <label>Gmail label to add <input id="fLabel" type="text" value="Sweeper review"></label>
-    <div class="row">
-      <button id="fApply" class="primary">Label matches in Gmail</button>
-      <button id="fShow">Show biggest matches</button>
-      <button id="fClear">Remove this label</button>
+  <section id="dataTab" class="tab active" aria-labelledby="dataHeading">
+    <div class="panel">
+      <h2 id="dataHeading">Gmail data</h2>
+      <button id="connect" class="primary">Connect Gmail</button>
+      <button id="dataAction" disabled>Scan Gmail</button>
+      <button id="pause" disabled>Pause</button>
+      <div class="bar"><div id="fill"></div></div>
+      <p id="counts"></p>
+      <p id="lastSynced" class="hint">Not synced yet.</p>
     </div>
-    <h2>Move to Trash</h2>
-    <p class="hint">Moves every message that still has the label above to Trash. Messages you un-labelled in Gmail are left alone, and starred messages are always skipped. Gmail keeps Trash for 30 days, and space is only freed once Trash is emptied.</p>
-    <div class="row">
-      <button id="tTrash" class="danger">Trash labelled messages</button>
-      <button id="tUndo">Undo last trash</button>
-    </div>
-    <p id="tInfo" class="hint"></p>
   </section>
-  <ul id="list"></ul>
+  <section id="exploreTab" class="tab" aria-labelledby="exploreHeading">
+    <h2 id="exploreHeading">Explore your mail</h2>
+    <div class="segmented" role="group" aria-label="Explore view">
+      <button id="exploreSpace" aria-pressed="true">Where's the space?</button>
+      <button id="exploreSenders" aria-pressed="false">Top senders</button>
+      <button id="exploreBiggest" aria-pressed="false">Biggest messages</button>
+    </div>
+    <ul id="results" aria-live="polite"><li class="empty">Scan Gmail to explore your messages.</li></ul>
+  </section>
+  <section id="reviewTab" class="tab" aria-labelledby="reviewHeading">
+    <h2 id="reviewHeading">Review messages</h2>
+    <div class="panel">
+      <details id="reviewFilters" open>
+        <summary>Filters <span id="filterSummary" class="muted"></span></summary>
+        <div id="filterFields">
+          <label>Sender contains <input id="fSender" type="text" placeholder="e.g. caltech.edu" autocomplete="off"></label>
+          <div class="fieldgrid">
+            <label>Size from (MB) <input id="fSizeFrom" type="number" min="0" step="0.1" inputmode="decimal" placeholder="No minimum"></label>
+            <label>Size to (MB) <input id="fSizeTo" type="number" min="0" step="0.1" inputmode="decimal" placeholder="No maximum"></label>
+            <label>Age from (years) <input id="fAgeFrom" type="number" min="0" step="0.5" inputmode="decimal" placeholder="No minimum"></label>
+            <label>Age to (years) <input id="fAgeTo" type="number" min="0" step="0.5" inputmode="decimal" placeholder="No maximum"></label>
+          </div>
+          <label>Type<select id="fType">
+            <option value="any">Any</option><option value="sent">Sent</option><option value="notsent">Everything except Sent</option>
+            <option value="promotions">Promotions</option><option value="social">Social</option><option value="updates">Updates</option><option value="forums">Forums</option><option value="auto">All four categories</option>
+            <option value="inbox">Inbox</option><option value="spam">Spam</option><option value="archived">Archived</option>
+          </select></label>
+          <div class="row"><button id="clearFilters">Clear filters</button></div>
+        </div>
+      </details>
+      <p id="fMatch" class="summary">No messages loaded yet.</p>
+    </div>
+    <div class="panel">
+      <div class="checkrow"><input id="selectAll" type="checkbox" aria-label="Select all matching messages"><label for="selectAll"><strong>Select all matches</strong></label></div>
+      <p id="selectionSummary">0 selected</p>
+      <p id="showing">Showing 0–0 of 0</p>
+      <ul id="matches" aria-live="polite"><li class="empty">Open Review to load your messages.</li></ul>
+      <nav id="pagination" aria-label="Review pages">
+        <button id="prevPage" disabled>← Previous</button>
+        <label id="pageJump">Page <input id="pageNumber" type="number" min="1" value="1" inputmode="numeric" aria-label="Go to page"> <span id="pageTotal">of 1</span></label>
+        <button id="nextPage" disabled>Next →</button>
+      </nav>
+    </div>
+    <div id="actions">
+      <div class="row"><button id="trashSelected" class="danger" disabled>Trash selected</button><button id="undoTrash">Undo last trash</button></div>
+      <p id="tInfo" class="hint"></p>
+      <details id="optional" class="panel">
+        <summary>Optional: add a Gmail label to selected messages</summary>
+        <label>Label name <input id="fLabel" type="text" value="Sweeper review"></label>
+        <div class="row"><button id="applyLabel">Apply label to selected</button></div>
+      </details>
+    </div>
+  </section>
 </main>
-
+<nav id="tabs" aria-label="Main tabs">
+  <button id="tabData" aria-current="page">Data</button>
+  <button id="tabExplore">Explore</button>
+  <button id="tabReview">Review</button>
+</nav>
 <script>
 const CLIENT_ID = '164588121644-fqbd137vllni6v951h5um974agbnrhs0.apps.googleusercontent.com';
 const SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
@@ -150,10 +204,17 @@ async function missing(ids) {
 }
 
 /* ---------- Auth ---------- */
+function expireForAction() {
+  token = null; needsReconnect = false;
+  $('connect').textContent = 'Reconnect Gmail';
+  $('dataAction').disabled = true;
+  say('Your Gmail session expired. Tap Reconnect Gmail, then retry the action. Check Gmail first if a bulk action was interrupted.', true);
+}
 function needReconnect() {
   needsReconnect = true;
   token = null;
-  $('sync').disabled = true;
+  $('dataAction').disabled = true;
+  $('pause').disabled = true;
   $('connect').textContent = 'Reconnect & resume';
   say('Paused: your Gmail session expired (they last about an hour). Tap "Reconnect & resume" to carry on where you left off. Nothing was lost.', true);
 }
@@ -168,10 +229,9 @@ function connect() {
       const resume = needsReconnect;
       needsReconnect = false;
       $('connect').textContent = 'Connect Gmail';
-      $('scan').disabled = false;
-      $('sync').disabled = false;
+      updateDataAction();
       if (resume) (resumeFn || scan)(); // came here because the session expired: carry on automatically
-      else say('Connected. Tap Start scan. Sessions last about an hour.');
+      else say('Connected. Choose Scan Gmail to begin. Sessions last about an hour.');
     }
   });
   client.requestAccessToken();
@@ -287,7 +347,7 @@ async function scan(opts = {}) {
   skipped = 0; badStreak = 0;
   running = true;
   keepAwake(true);
-  $('scan').disabled = true; $('sync').disabled = true; $('stop').disabled = false;
+  $('dataAction').disabled = true; $('pause').disabled = false;
   try {
     const prof = await api('/profile');
     total = prof.messagesTotal;
@@ -346,16 +406,16 @@ async function scan(opts = {}) {
         break;
       }
     }
-    if (!running) say('Paused. Start scan resumes where it left off.');
+    if (!running) say('Paused. Resume scan picks up where it left off.');
   } catch (e) {
     if (e.message === 'expired') needReconnect();
     else say('Stopped: ' + e.message + (e.path ? ` (${e.path})` : ''), true);
   }
   running = false;
   keepAwake(false);
-  $('stop').disabled = true;
-  $('scan').disabled = needsReconnect; // can't scan again until we have a fresh token
-  $('sync').disabled = needsReconnect;
+  $('pause').disabled = true;
+  if (activeTab === 'review') await refreshReview();
+  await updateDataAction();
 }
 
 /* ---------- Sync with Gmail ---------- */
@@ -459,7 +519,7 @@ async function sync() {
   if (running || syncing) return;
   if (!token) { say('Tap Connect Gmail first.', true); return; }
   syncing = true; resumeFn = sync;
-  $('sync').disabled = true; $('scan').disabled = true;
+  $('dataAction').disabled = true;
   try {
     const h = await getMeta('history');
     if (h && h.id) {
@@ -480,292 +540,302 @@ async function sync() {
     else say('Sync stopped: ' + e.message, true);
   } finally {
     syncing = false;
-    $('scan').disabled = needsReconnect; $('sync').disabled = needsReconnect;
-    if (!$('filter').hidden) { reviewRows = await everything(); updateMatch(); updateTrashInfo(); } // keep the open review panel current
+    $('dataAction').disabled = needsReconnect;
+    if (activeTab === 'review') await refreshReview(); // keep the open review tab current
+    await updateDataAction();
   }
 }
 
-/* ---------- Report ---------- */
+/* ---------- Explore + Review ---------- */
 const everything = async () => (await run('msgs', 'readonly', st => st.getAll())).filter(m => !m.bad);
-
-// sections: [{ title, rows: [{ label, sub, bytes, num, id }] }]
-function renderSections(sections) {
-  const list = $('list');
-  list.replaceChildren();
-  sections.forEach(sec => {
-    const h = document.createElement('li');
-    h.className = 'head'; h.textContent = sec.title;
-    list.appendChild(h);
-    sec.rows.forEach(r => {
-      const li = document.createElement('li');
-      if (r.id) li.dataset.id = r.id;
-      const who = document.createElement('span'); who.className = 'who';
-      who.append(document.createTextNode(r.label));
-      if (r.sub) { const sb = document.createElement('small'); sb.className = 'sub'; sb.textContent = r.sub; who.appendChild(sb); }
-      const size = document.createElement('span'); size.className = 'size'; size.textContent = fmt(r.bytes);
-      const num = document.createElement('span'); num.className = 'num'; num.textContent = r.num || '';
-      size.appendChild(num);
-      li.append(who, size);
-      list.appendChild(li);
-    });
-  });
-}
-
-async function report() {
-  const all = await everything();
-  if (!all.length) { say('Nothing scanned yet.'); return; }
-  const by = {};
-  all.forEach(m => { const g = by[m.from] || (by[m.from] = { n: 0, bytes: 0 }); g.n++; g.bytes += m.size; });
-  const top = Object.entries(by).sort((a, b) => b[1].bytes - a[1].bytes).slice(0, 25);
-  renderSections([{ title: 'Top senders by size', rows: top.map(([from, g]) => ({ label: from, bytes: g.bytes, num: msgs(g.n) })) }]);
-}
-
-// Where is the space? Every message goes into exactly one bucket per breakdown.
-const LABEL_GROUPS = [
-  ['Trash', l => l.includes('TRASH')], ['Spam', l => l.includes('SPAM')], ['Sent', l => l.includes('SENT')],
-  ['Promotions', l => l.includes('CATEGORY_PROMOTIONS')], ['Social', l => l.includes('CATEGORY_SOCIAL')],
-  ['Updates', l => l.includes('CATEGORY_UPDATES')], ['Forums', l => l.includes('CATEGORY_FORUMS')],
-  ['Inbox', l => l.includes('INBOX')], ['Archived (everything else)', () => true]
-];
-const AGE_BUCKETS = [['Over 10 years old', 10], ['5 to 10 years', 5], ['2 to 5 years', 2], ['1 to 2 years', 1], ['Under 1 year', 0]];
-const SIZE_BUCKETS = [['10 MB and up', 1e7], ['1 to 10 MB', 1e6], ['100 KB to 1 MB', 1e5], ['Under 100 KB', 0]];
-
-function tally(all, defs, pick, totalBytes) {
-  const out = defs.map(d => ({ label: d[0], n: 0, bytes: 0 }));
-  all.forEach(m => { const o = out[pick(m)]; o.n++; o.bytes += m.size; });
-  return out.filter(o => o.n).sort((a, b) => b.bytes - a.bytes).map(o => ({
-    label: o.label, bytes: o.bytes,
-    num: `${msgs(o.n)} · ${Math.round(o.bytes / totalBytes * 100)}%`
-  }));
-}
-async function overview() {
-  const all = await everything();
-  if (!all.length) { say('Nothing scanned yet.'); return; }
-  const total = all.reduce((t, m) => t + m.size, 0), now = Date.now();
-  const years = m => (now - m.date) / (365.25 * 864e5);
-  renderSections([
-    { title: 'Everything scanned', rows: [{ label: 'All messages', bytes: total, num: msgs(all.length) }] },
-    { title: 'By type', rows: tally(all, LABEL_GROUPS, m => LABEL_GROUPS.findIndex(g => g[1](m.labels)), total) },
-    { title: 'By age', rows: tally(all, AGE_BUCKETS, m => AGE_BUCKETS.findIndex(b => years(m) >= b[1]), total) },
-    { title: 'By message size', rows: tally(all, SIZE_BUCKETS, m => SIZE_BUCKETS.findIndex(b => m.size >= b[1]), total) }
-  ]);
-}
-
 const when = m => new Date(m.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-const subLine = m => when(m) + (m.labels.includes('SENT') ? ' · sent' : '');
-
-// Show messages as a list; fetch subject lines when connected.
-async function showMessages(title, list) {
-  renderSections([{ title, rows: list.map(m => ({ id: m.id, label: m.from, sub: subLine(m), bytes: m.size })) }]);
-  if (!token) { say('Connect Gmail to also see subject lines.'); return; }
-  say('Loading subject lines…');
-  for (const m of list) {
-    try {
-      const r = await api(`/messages/${m.id}?format=metadata&metadataHeaders=Subject&fields=payload/headers`);
-      const subj = r.payload && r.payload.headers && r.payload.headers[0] && r.payload.headers[0].value;
-      const row = document.querySelector(`#list li[data-id="${m.id}"] .who`);
-      if (row && subj) {
-        row.firstChild.textContent = subj;
-        row.querySelector('.sub').textContent = m.from + ' · ' + subLine(m);
-      }
-    } catch (e) { if (e.message === 'expired') { say('Session expired. Tap Connect Gmail to load subject lines.', true); return; } }
-  }
-  say('');
-}
-async function biggest() {
-  const all = (await everything()).sort((a, b) => b.size - a.size).slice(0, 25);
-  if (!all.length) { say('Nothing scanned yet.'); return; }
-  showMessages('Biggest messages', all);
-}
-
-/* ---------- Review filter + labelling ---------- */
 const AUTO = ['CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS', 'CATEGORY_SOCIAL'];
 const TYPE_TESTS = {
   any: () => true,
-  sent: l => l.includes('SENT'),
+  sent: l => !l.includes('TRASH') && !l.includes('SPAM') && l.includes('SENT'),
   notsent: l => !l.includes('SENT'),
-  auto: l => AUTO.some(c => l.includes(c))
+  promotions: l => !['TRASH','SPAM','SENT'].some(c=>l.includes(c)) && l.includes('CATEGORY_PROMOTIONS'),
+  social: l => !['TRASH','SPAM','SENT','CATEGORY_PROMOTIONS'].some(c=>l.includes(c)) && l.includes('CATEGORY_SOCIAL'),
+  updates: l => !['TRASH','SPAM','SENT','CATEGORY_PROMOTIONS','CATEGORY_SOCIAL'].some(c=>l.includes(c)) && l.includes('CATEGORY_UPDATES'),
+  forums: l => !['TRASH','SPAM','SENT','CATEGORY_PROMOTIONS','CATEGORY_SOCIAL','CATEGORY_UPDATES'].some(c=>l.includes(c)) && l.includes('CATEGORY_FORUMS'),
+  auto: l => AUTO.some(c => l.includes(c)),
+  inbox: l => !['TRASH','SPAM','SENT',...AUTO].some(c=>l.includes(c)) && l.includes('INBOX'),
+  spam: l => !l.includes('TRASH') && l.includes('SPAM'),
+  archived: l => !['TRASH','SPAM','SENT','INBOX',...AUTO].some(c => l.includes(c))
 };
-let reviewRows = [];
+let reviewRows = [], matchRows = [], excluded = new Set(), reviewPage = 1;
+let activeTab = 'data', exploreMode = 'space', subjectCache = new Map(), renderGeneration = 0;
+const PAGE_SIZE = 25;
 
+function switchTab(name) {
+  activeTab = name;
+  window.scrollTo(0,0);
+  ['data','explore','review'].forEach(tab => {
+    $(tab + 'Tab').classList.toggle('active', tab === name);
+    $('tab' + tab[0].toUpperCase() + tab.slice(1)).toggleAttribute('aria-current', tab === name);
+    if (tab === name) $('tab' + tab[0].toUpperCase() + tab.slice(1)).setAttribute('aria-current','page');
+    else $('tab' + tab[0].toUpperCase() + tab.slice(1)).removeAttribute('aria-current');
+  });
+  if (name === 'review') refreshReview();
+  if (name === 'explore') renderExplore();
+  if (name === 'data') updateDataAction();
+}
+function setExploreMode(mode) {
+  exploreMode = mode;
+  $('exploreSpace').setAttribute('aria-pressed', mode === 'space');
+  $('exploreSenders').setAttribute('aria-pressed', mode === 'senders');
+  $('exploreBiggest').setAttribute('aria-pressed', mode === 'biggest');
+  renderExplore();
+}
+function renderResultRows(rows) {
+  const list = $('results'); list.replaceChildren();
+  if (!rows.length) { const li=document.createElement('li'); li.className='empty'; li.textContent='Nothing to show yet.'; list.append(li); return; }
+  rows.forEach(r => {
+    const li=document.createElement('li');
+    if (r.header) { li.className='sectionHeader'; li.textContent=r.label; list.append(li); return; }
+    if (r.disabled) { li.className='disabled'; const label=document.createElement('span');label.textContent=r.label;const note=document.createElement('span');note.className='size';note.textContent=r.num||'';li.append(label,note);list.append(li);return; }
+    li.tabIndex=0; li.setAttribute('role','button');
+    const who=document.createElement('span'); who.className='who'; who.textContent=r.label;
+    if (r.sub) { const sub=document.createElement('small'); sub.className='sub'; sub.textContent=r.sub; who.append(sub); }
+    const size=document.createElement('span'); size.className='size'; size.textContent=fmt(r.bytes);
+    if (r.num) { const n=document.createElement('small'); n.className='sub'; n.textContent=r.num; size.append(n); }
+    li.append(who,size);
+    const open=()=>{ applyExploreFilter(r.filter || {}); switchTab('review'); };
+    li.addEventListener('click',open); li.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}});
+    list.append(li);
+  });
+}
+function yearsOld(m, now=Date.now()) { return Math.max(0,(now-m.date)/(365.25*864e5)); }
+function renderSpace(all) {
+  const total=all.reduce((n,m)=>n+m.size,0), now=Date.now();
+  const defs=[
+    {title:'By type',items:[['Sent','sent'],['Promotions','promotions'],['Social','social'],['Updates','updates'],['Forums','forums'],['Inbox','inbox'],['Spam','spam'],['Archived','archived'],['Trash','trash']]},
+    {title:'By age',items:[['Over 10 years','age10'],['5–10 years','age5'],['2–5 years','age2'],['1–2 years','age1'],['Under 1 year','age0']]},
+    {title:'By message size',items:[['10 MB and up','size10'],['1–10 MB','size1'],['100 KB–1 MB','size100k'],['Under 100 KB','size0']]}
+  ];
+  const out=[{label:'Everything scanned',bytes:total,num:msgs(all.length),filter:{}}];
+  defs.forEach(section=>{
+    const rows=[];
+    section.items.forEach(([label,key])=>{
+      const filter={};
+      let subset=[];
+      if(key==='sent'||key==='promotions'||key==='social'||key==='updates'||key==='forums'||key==='inbox'||key==='spam'||key==='archived') {
+        filter.type=key; subset=all.filter(m=>key==='archived' ? TYPE_TESTS.archived(m.labels) : TYPE_TESTS[key](m.labels));
+      } else if(key==='trash') { subset=all.filter(m=>m.labels.includes('TRASH')); }
+      else if(key.startsWith('age')) {
+        const n=Number(key.slice(3)); filter.ageFrom=n===0?0:n; filter.ageTo=n===10?null:n===5?10:n===2?5:n===1?2:1;
+        subset=all.filter(m=>yearsOld(m,now)>=filter.ageFrom && (filter.ageTo==null||yearsOld(m,now)<filter.ageTo));
+      } else {
+        const ranges={size10:[10,null],size1:[1,10],size100k:[.1,1],size0:[0,.1]};
+        [filter.sizeFrom,filter.sizeTo]=ranges[key]; subset=all.filter(m=>m.size/1e6>=filter.sizeFrom&&(filter.sizeTo==null||m.size/1e6<filter.sizeTo));
+      }
+      if(subset.length) rows.push({label,bytes:subset.reduce((n,m)=>n+m.size,0),num:key==='trash'?'Already in Trash':`${msgs(subset.length)} · ${total?Math.round(subset.reduce((n,m)=>n+m.size,0)/total*100):0}%`,filter:key==='trash'?null:filter,disabled:key==='trash'});
+    });
+    if(rows.length) { out.push({label:section.title,header:true}); out.push(...rows); }
+  });
+  return out;
+}
+async function renderExplore() {
+  const all=await everything();
+  if(!all.length){renderResultRows([]);return;}
+  if(exploreMode==='senders') {
+    const by=new Map(); all.forEach(m=>{const g=by.get(m.from)||{n:0,bytes:0};g.n++;g.bytes+=m.size;by.set(m.from,g);});
+    const rows=[...by.entries()].sort((a,b)=>b[1].bytes-a[1].bytes).slice(0,25).map(([from,g])=>({label:from,bytes:g.bytes,num:msgs(g.n),filter:{sender:from}}));
+    renderResultRows(rows);
+  } else if(exploreMode==='biggest') {
+    const rows=[...all].sort((a,b)=>b.size-a.size).slice(0,25).map(m=>({label:m.from,sub:when(m)+(m.labels.includes('SENT')?' · sent':''),bytes:m.size,num:'Open review for this sender',filter:{sender:m.from,sizeFrom:m.size/1e6}}));
+    renderResultRows(rows);
+  } else renderResultRows(renderSpace(all));
+}
+function applyExploreFilter(filter) {
+  resetSelection();
+  $('fSender').value=filter.sender||'';
+  $('fSizeFrom').value=filter.sizeFrom==null?'':filter.sizeFrom;
+  $('fSizeTo').value=filter.sizeTo==null?'':filter.sizeTo;
+  $('fAgeFrom').value=filter.ageFrom==null?'':filter.ageFrom;
+  $('fAgeTo').value=filter.ageTo==null?'':filter.ageTo;
+  $('fType').value=filter.type||'any';
+  reviewPage=1; recomputeMatches(); $('reviewFilters').open=true;
+}
+
+function filterValues() {
+  const number=id=>$(id).value.trim()===''?null:Number($(id).value);
+  return {sender:$('fSender').value.trim().toLowerCase(),sizeFrom:number('fSizeFrom'),sizeTo:number('fSizeTo'),ageFrom:number('fAgeFrom'),ageTo:number('fAgeTo'),type:$('fType').value};
+}
 function matching() {
-  const minBytes = (parseFloat($('fSize').value) || 0) * 1e6;
-  const minAge = (parseFloat($('fAge').value) || 0) * 365.25 * 864e5;
-  const test = TYPE_TESTS[$('fType').value], now = Date.now();
-  // Trash is always excluded: those messages are already on their way out.
-  return reviewRows.filter(m => m.size >= minBytes && now - m.date >= minAge && !m.labels.includes('TRASH') && test(m.labels));
+  const f=filterValues(), now=Date.now(), test=TYPE_TESTS[f.type] || (()=>true);
+  return reviewRows.filter(m=>{
+    const size=m.size/1e6, age=yearsOld(m,now);
+    if(m.labels.includes('TRASH')||m.labels.includes('STARRED')) return false;
+    if(f.sender&&!m.from.toLowerCase().includes(f.sender)) return false;
+    if(f.sizeFrom!=null&&size<f.sizeFrom) return false;
+    if(f.sizeTo!=null&&size>=f.sizeTo) return false;
+    if(f.ageFrom!=null&&age<f.ageFrom) return false;
+    if(f.ageTo!=null&&age>=f.ageTo) return false;
+    if(!test(m.labels)) return false;
+    return true;
+  }).sort((a,b)=>b.size-a.size||b.date-a.date);
 }
-function updateMatch() {
-  const m = matching(), bytes = m.reduce((t, x) => t + x.size, 0);
-  $('fMatch').textContent = m.length ? `${msgs(m.length)} · ${fmt(bytes)} match` : 'Nothing matches these settings.';
+function resetSelection(){ excluded=new Set(); }
+function recomputeMatches(reset=true) {
+  if(reset) { resetSelection(); reviewPage=1; }
+  matchRows=matching();
+  const bytes=matchRows.reduce((n,m)=>n+m.size,0);
+  $('fMatch').textContent=matchRows.length?`${msgs(matchRows.length)} · ${fmt(bytes)} match`:'Nothing matches these settings.';
+  $('filterSummary').textContent=matchRows.length?` · ${msgs(matchRows.length)}`:'';
+  renderReviewPage();
 }
-async function openReview() {
-  $('filter').hidden = false;
-  reviewRows = await everything();
-  if (!reviewRows.length) { say('Nothing scanned yet.'); return; }
-  updateMatch(); updateTrashInfo();
-  $('filter').scrollIntoView({ behavior: 'smooth', block: 'start' });
+function selectedRows(){return matchRows.filter(m=>!excluded.has(m.id));}
+function updateSelectionSummary(){
+  const selected=selectedRows(), bytes=selected.reduce((n,m)=>n+m.size,0);
+  $('selectionSummary').textContent=`${msgs(selected.length)} selected · ${fmt(bytes)}`;
+  $('trashSelected').disabled=!selected.length||!token;
+  const all=matchRows.length>0&&selected.length===matchRows.length;
+  $('selectAll').checked=all; $('selectAll').indeterminate=selected.length>0&&!all;
 }
-async function showMatches() {
-  const m = matching().sort((a, b) => b.size - a.size).slice(0, 25);
-  if (!m.length) { say('Nothing matches these settings.'); return; }
-  showMessages('Biggest matches', m);
-}
-
-async function findLabel(name) {
-  const r = await api('/labels');
-  const l = (r.labels || []).find(x => x.name.toLowerCase() === name.toLowerCase());
-  return l ? l.id : null;
-}
-async function ensureLabel(name) {
-  const found = await findLabel(name);
-  if (found) return found;
-  const r = await api('/labels', { method: 'POST', body: JSON.stringify({ name, labelListVisibility: 'labelShow', messageListVisibility: 'show' }) });
-  return r.id;
-}
-async function batchLabel(ids, body) {
-  for (let i = 0; i < ids.length; i += 1000) {
-    await api('/messages/batchModify', { method: 'POST', body: JSON.stringify({ ids: ids.slice(i, i + 1000), ...body }) });
-    say(`Working… ${Math.min(i + 1000, ids.length).toLocaleString()} of ${ids.length.toLocaleString()}`);
+async function loadSubjects(rows,generation) {
+  if(!token) return;
+  for(const m of rows) {
+    if(generation!==renderGeneration||activeTab!=='review') return;
+    if(subjectCache.has(m.id)){const node=document.querySelector(`[data-message-id="${CSS.escape(m.id)}"] .subject`);if(node)node.textContent=subjectCache.get(m.id);continue;}
+    try {
+      const r=await api(`/messages/${m.id}?format=metadata&metadataHeaders=Subject&fields=payload/headers`);
+      const headers=(r.payload&&r.payload.headers)||[], h=headers.find(x=>x.name&&x.name.toLowerCase()==='subject');
+      const subject=h&&h.value?h.value:'(no subject)'; subjectCache.set(m.id,subject);
+      if(generation===renderGeneration&&activeTab==='review') {const node=document.querySelector(`[data-message-id="${CSS.escape(m.id)}"] .matchtext`);if(node)node.textContent=subject;}
+    } catch(e) {if(e.message==='expired'){expireForAction();return;} }
   }
 }
-const labelName = () => $('fLabel').value.trim();
-
-async function applyLabel() {
-  const name = labelName(), m = matching();
-  if (!token) { say('Tap Connect Gmail first.', true); return; }
-  if (!name) { say('Enter a label name.', true); return; }
-  if (!m.length) { say('Nothing matches these settings.'); return; }
-  try {
-    const id = await ensureLabel(name);
-    await batchLabel(m.map(x => x.id), { addLabelIds: [id] });
-    m.forEach(x => { if (!x.labels.includes(id)) x.labels.push(id); });
-    await putMany(m); // keep the local copy in step with Gmail
-    say(`Added the label "${name}" to ${msgs(m.length)}. Open that label in Gmail to review them. Nothing was moved or deleted.`);
-  } catch (e) {
-    if (e.message === 'expired') say('Session expired. Tap Connect Gmail, then try again.', true);
-    else say('Labelling stopped: ' + e.message, true);
-  }
+function renderReviewPage() {
+  renderGeneration++;
+  const generation=renderGeneration, total=matchRows.length, pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
+  reviewPage=Math.min(Math.max(1,reviewPage),pages);
+  const start=(reviewPage-1)*PAGE_SIZE, rows=matchRows.slice(start,start+PAGE_SIZE), end=Math.min(start+PAGE_SIZE,total);
+  $('showing').textContent=`Showing ${total?start+1:0}–${end} of ${total.toLocaleString()}`;
+  $('pageNumber').value=reviewPage; $('pageNumber').max=pages; $('pageTotal').textContent=`of ${pages.toLocaleString()}`;
+  $('prevPage').disabled=reviewPage<=1; $('nextPage').disabled=reviewPage>=pages;
+  const list=$('matches'); list.replaceChildren();
+  if(!rows.length){const li=document.createElement('li');li.className='empty';li.textContent='No messages match these filters.';list.append(li);}
+  rows.forEach(m=>{
+    const li=document.createElement('li');li.dataset.messageId=m.id;
+    const wrap=document.createElement('div');wrap.className='checkrow';
+    const cb=document.createElement('input');cb.type='checkbox';cb.checked=!excluded.has(m.id);cb.setAttribute('aria-label','Select message');
+    cb.addEventListener('change',()=>{if(cb.checked)excluded.delete(m.id);else excluded.add(m.id);updateSelectionSummary();});
+    const text=document.createElement('div');text.className='matchtext';
+    const subject=document.createElement('span');subject.className='subject';subject.textContent=subjectCache.get(m.id)||m.from;
+    const sub=document.createElement('small');sub.className='sub';sub.textContent=`${m.from} · ${when(m)}`;text.append(subject,sub);
+    wrap.append(cb,text);
+    const size=document.createElement('span');size.className='size';size.textContent=fmt(m.size);
+    li.append(wrap,size);list.append(li);
+  });
+  updateSelectionSummary();
+  loadSubjects(rows,generation);
 }
-/* ---------- Move to Trash (with undo) ---------- */
-async function bulkTrash(ids, undo) {
-  try {
-    await batchLabel(ids, undo ? { removeLabelIds: ['TRASH'] } : { addLabelIds: ['TRASH'] });
-    return;
-  } catch (e) {
-    if (e.status !== 400 && e.status !== 404) throw e;
-  }
-  // Fallback: one message at a time (repeating a message is harmless; vanished ones are skipped).
-  let n = 0;
-  for (const id of ids) {
-    try { await api(`/messages/${id}/${undo ? 'untrash' : 'trash'}`, { method: 'POST' }); }
-    catch (e) { if (e.status !== 404) throw e; }
-    if (++n % 50 === 0) say(`Working… ${n.toLocaleString()} of ${ids.length.toLocaleString()}`);
-  }
+async function refreshReview() {
+  reviewRows=await everything();
+  recomputeMatches(false);
+  await updateTrashInfo();
 }
 async function updateTrashInfo() {
-  const t = reviewRows.filter(m => m.labels.includes('TRASH'));
-  const log = (await getMeta('trashLog')) || [];
-  const last = log[log.length - 1];
-  $('tInfo').textContent = `In Trash now: ${msgs(t.length)}, ${fmt(t.reduce((a, m) => a + m.size, 0))}.` +
-    (last ? ` Last trash run: ${msgs(last.ids.length)} on ${new Date(last.at).toLocaleDateString()}.` : '');
+  const all=reviewRows.filter(m=>m.labels.includes('TRASH'));
+  const log=(await getMeta('trashLog'))||[], last=log[log.length-1];
+  $('tInfo').textContent=`In Trash now: ${msgs(all.length)}, ${fmt(all.reduce((n,m)=>n+m.size,0))}.`+(last?` Last trash run: ${msgs(last.ids.length)} on ${new Date(last.at).toLocaleDateString()}.`:'');
 }
-function setCached(ids, change) {
-  const set = new Set(ids), rows = reviewRows.filter(m => set.has(m.id));
-  rows.forEach(change);
-  return putMany(rows);
+async function findLabel(name) {
+  const r=await api('/labels'); const l=(r.labels||[]).find(x=>x.name.toLowerCase()===name.toLowerCase()); return l?l.id:null;
 }
-async function trashLabelled() {
-  const name = labelName();
-  if (!token) { say('Tap Connect Gmail first.', true); return; }
-  if (!name) { say('Enter the label name above.', true); return; }
+async function ensureLabel(name) {
+  const found=await findLabel(name); if(found)return found;
+  const r=await api('/labels',{method:'POST',body:JSON.stringify({name,labelListVisibility:'labelShow',messageListVisibility:'show'})});return r.id;
+}
+async function batchLabel(ids,body) {
+  for(let i=0;i<ids.length;i+=1000){await api('/messages/batchModify',{method:'POST',body:JSON.stringify({ids:ids.slice(i,i+1000),...body})});say(`Working… ${Math.min(i+1000,ids.length).toLocaleString()} of ${ids.length.toLocaleString()}`);}
+}
+const labelName=()=>$('fLabel').value.trim();
+async function applyLabel() {
+  const name=labelName(), rows=selectedRows();
+  if(!token){say('Tap Connect Gmail first.',true);return;} if(!name){say('Enter a label name.',true);return;} if(!rows.length){say('No messages are selected.');return;}
+  try {const id=await ensureLabel(name);await batchLabel(rows.map(m=>m.id),{addLabelIds:[id]});rows.forEach(m=>{if(!m.labels.includes(id))m.labels.push(id);});await putMany(rows);say(`Added "${name}" to ${msgs(rows.length)} selected messages.`);}
+  catch(e){if(e.message==='expired')expireForAction();else say('Labelling stopped: '+e.message,true);}
+}
+async function bulkTrash(ids,undo) {
+  try {await batchLabel(ids,undo?{removeLabelIds:['TRASH']}:{addLabelIds:['TRASH']});return;}
+  catch(e){if(e.status!==400&&e.status!==404)throw e;}
+  let n=0;for(const id of ids){try{await api(`/messages/${id}/${undo?'untrash':'trash'}`,{method:'POST'});}catch(e){if(e.status!==404)throw e;}if(++n%50===0)say(`Working… ${n.toLocaleString()} of ${ids.length.toLocaleString()}`);}
+}
+async function trashSelected() {
+  const chosen=selectedRows();
+  if(!token){say('Tap Connect Gmail first.',true);return;}
+  if(!chosen.length){say('No messages are selected.');return;}
   try {
-    say('Checking Gmail…');
-    const id = await findLabel(name);
-    if (!id) { say(`No label called "${name}" exists in Gmail.`); return; }
-    // Ask Gmail directly (not the local copy), so anything you un-labelled or starred in Gmail is respected.
-    const [labelled, starred, trashed] = await Promise.all([listIds(id), listIds('STARRED'), listIds('TRASH')]);
-    const ids = [...labelled].filter(x => !starred.has(x) && !trashed.has(x));
-    const skipped = [...labelled].filter(x => starred.has(x)).length;
-    if (!ids.length) { say(`Nothing to trash: no un-starred messages labelled "${name}" outside Trash.`); return; }
-    const byId = new Map(reviewRows.map(m => [m.id, m]));
-    const bytes = ids.reduce((t, x) => t + ((byId.get(x) || {}).size || 0), 0);
-    const ok = confirm(`Move ${msgs(ids.length)} (${fmt(bytes)}) labelled "${name}" to Trash?` +
-      (skipped ? `\n\n${msgs(skipped)} starred will be skipped.` : '') +
-      '\n\nYou can undo from this screen, and Gmail keeps Trash for 30 days.');
-    if (!ok) { say('Cancelled. Nothing was changed.'); return; }
-    await bulkTrash(ids, false);
-    const log = (await getMeta('trashLog')) || [];
-    log.push({ at: Date.now(), ids, bytes });
-    await setMeta('trashLog', log.slice(-10));
-    await setCached(ids, m => { if (!m.labels.includes('TRASH')) m.labels.push('TRASH'); });
-    updateMatch(); await updateTrashInfo();
-    say(`Moved ${msgs(ids.length)} (${fmt(bytes)}) to Trash. Space is freed when Trash is emptied in Gmail, or after 30 days.`);
-  } catch (e) {
-    if (e.message === 'expired') say('Session expired. Tap Connect Gmail, then try again.', true);
-    else say('Stopped: ' + e.message + '. Tap Sync with Gmail to see where things stand.', true);
-  }
+    say('Checking starred and trashed messages in Gmail…');
+    const [starred,trashed]=await Promise.all([listIds('STARRED'),listIds('TRASH')]);
+    const skipped=chosen.filter(m=>starred.has(m.id)||trashed.has(m.id));
+    skipped.forEach(m=>{
+      if(starred.has(m.id)&&!m.labels.includes('STARRED'))m.labels.push('STARRED');
+      if(trashed.has(m.id)&&!m.labels.includes('TRASH'))m.labels.push('TRASH');
+    });
+    if(skipped.length){await putMany(skipped);recomputeMatches(false);}
+    const rows=chosen.filter(m=>!starred.has(m.id)&&!trashed.has(m.id));
+    const ids=rows.map(m=>m.id),bytes=rows.reduce((n,m)=>n+m.size,0);
+    if(!ids.length){recomputeMatches(false);await updateTrashInfo();say('No selected messages remain eligible. Starred and already-trashed messages were skipped.');return;}
+    const ok=confirm(`Move ${msgs(ids.length)} (${fmt(bytes)}) to Gmail Trash? Starred and already-trashed messages are excluded.${skipped.length?`\n\n${msgs(skipped.length)} newly starred or trashed messages were skipped.`:''} You can undo this from the Review tab.`);
+    if(!ok){say('Cancelled. Nothing was changed.');return;}
+    say('Moving selected messages to Trash…'); await bulkTrash(ids,false);
+    const log=(await getMeta('trashLog'))||[];log.push({at:Date.now(),ids,bytes});await setMeta('trashLog',log.slice(-10));
+    rows.forEach(m=>{if(!m.labels.includes('TRASH'))m.labels.push('TRASH');});await putMany(rows);
+    say(`Moved ${msgs(ids.length)} (${fmt(bytes)}) to Trash. Empty Trash in Gmail to free the space.`);
+    recomputeMatches(false);await updateTrashInfo();
+  } catch(e){if(e.message==='expired')expireForAction();else say('Trash stopped: '+e.message+'. Sync with Gmail before retrying.',true);}
 }
 async function undoTrash() {
-  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  if(!token){say('Tap Connect Gmail first.',true);return;}
   try {
-    const log = (await getMeta('trashLog')) || [];
-    const last = log[log.length - 1];
-    if (!last) { say('Nothing to undo.'); return; }
-    say('Checking Gmail…');
-    // Only messages still in Trash can come back; emptied ones are gone for good.
-    const inTrash = await listIds('TRASH');
-    const ids = last.ids.filter(x => inTrash.has(x));
-    if (!ids.length) {
-      await setMeta('trashLog', log.slice(0, -1));
-      say('None of those messages are still in Trash, so there is nothing to restore.');
-      return;
-    }
-    const ok = confirm(`Restore ${msgs(ids.length)} from Trash? (${msgs(last.ids.length)} were moved on ${new Date(last.at).toLocaleString()}.)`);
-    if (!ok) { say('Cancelled. Nothing was changed.'); return; }
-    await bulkTrash(ids, true);
-    await setMeta('trashLog', log.slice(0, -1));
-    await setCached(ids, m => { m.labels = m.labels.filter(l => l !== 'TRASH'); });
-    updateMatch(); await updateTrashInfo();
-    say(`Restored ${msgs(ids.length)} from Trash.`);
-  } catch (e) {
-    if (e.message === 'expired') say('Session expired. Tap Connect Gmail, then try again.', true);
-    else say('Stopped: ' + e.message, true);
-  }
+    const log=(await getMeta('trashLog'))||[],last=log[log.length-1];if(!last){say('Nothing to undo.');return;}
+    say('Checking Gmail Trash…');const inTrash=await listIds('TRASH'),ids=last.ids.filter(id=>inTrash.has(id));
+    if(!ids.length){await setMeta('trashLog',log.slice(0,-1));say('None of those messages are still in Trash.');return;}
+    const ok=confirm(`Restore ${msgs(ids.length)} from the last trash run?`);if(!ok){say('Cancelled. Nothing was changed.');return;}
+    await bulkTrash(ids,true);await setMeta('trashLog',log.slice(0,-1));
+    const set=new Set(ids);reviewRows.filter(m=>set.has(m.id)).forEach(m=>{m.labels=m.labels.filter(l=>l!=='TRASH');});await putMany(reviewRows.filter(m=>set.has(m.id)));
+    say(`Restored ${msgs(ids.length)} from Trash.`);recomputeMatches(false);await updateTrashInfo();
+  } catch(e){if(e.message==='expired')expireForAction();else say('Restore stopped: '+e.message,true);}
 }
+async function updateDataAction() {
+  const meta=(await getMeta('scan'))||{},history=await getMeta('history');
+  $('dataAction').textContent=meta.pageToken?'Resume scan':history&&history.id?'Sync with Gmail':'Scan Gmail';
+  $('dataAction').disabled=!token||running||syncing;
+  $('pause').disabled=!running;
+  $('lastSynced').textContent=history&&history.at?`Last synced ${new Date(history.at).toLocaleString()}.`:'Not synced yet.';
+}
+async function runDataAction() {
+  if(!token){say('Connect Gmail first.',true);return;}
+  const meta=(await getMeta('scan'))||{},history=await getMeta('history');
+  if(meta.pageToken) await scan(); else if(history&&history.id) await sync(); else await scan({fresh:true});
+  await updateDataAction();
+}
+async function openReview() { await refreshReview(); }
 
-async function removeLabel() {
-  const name = labelName();
-  if (!token) { say('Tap Connect Gmail first.', true); return; }
-  try {
-    const id = name && await findLabel(name);
-    if (!id) { say(`No label called "${name}" exists in Gmail.`); return; }
-    const m = reviewRows.filter(x => x.labels.includes(id));
-    await batchLabel(m.map(x => x.id), { removeLabelIds: [id] });
-    m.forEach(x => { x.labels = x.labels.filter(l => l !== id); });
-    await putMany(m);
-    say(`Removed "${name}" from ${msgs(m.length)}. The label itself is still in Gmail; delete it there if you like.`);
-  } catch (e) {
-    if (e.message === 'expired') say('Session expired. Tap Connect Gmail, then try again.', true);
-    else say('Stopped: ' + e.message, true);
-  }
-}
 
 $('connect').onclick = connect;
-$('scan').onclick = () => scan();
-$('sync').onclick = sync;
-$('stop').onclick = () => { running = false; };
-$('report').onclick = report;
-$('overview').onclick = overview;
-$('biggest').onclick = biggest;
-$('review').onclick = openReview;
-['fSize', 'fAge', 'fType'].forEach(id => $(id).addEventListener('input', updateMatch));
-$('fShow').onclick = showMatches;
-$('fApply').onclick = applyLabel;
-$('fClear').onclick = removeLabel;
-$('tTrash').onclick = trashLabelled;
-$('tUndo').onclick = undoTrash;
-countMsgs().then(n => { if (n) { done = n; $('counts').textContent = `${n.toLocaleString()} messages saved from an earlier scan`; } });
+$('dataAction').onclick = runDataAction;
+$('pause').onclick = () => { running = false; };
+$('tabData').onclick = () => switchTab('data');
+$('tabExplore').onclick = () => switchTab('explore');
+$('tabReview').onclick = () => switchTab('review');
+$('exploreSpace').onclick = () => setExploreMode('space');
+$('exploreSenders').onclick = () => setExploreMode('senders');
+$('exploreBiggest').onclick = () => setExploreMode('biggest');
+$('selectAll').onchange = () => { if ($('selectAll').checked) excluded.clear(); else matchRows.forEach(m=>excluded.add(m.id)); renderReviewPage(); };
+$('prevPage').onclick = () => { reviewPage--; renderReviewPage(); $('reviewHeading').scrollIntoView({block:'start',behavior:'smooth'}); };
+$('nextPage').onclick = () => { reviewPage++; renderReviewPage(); $('reviewHeading').scrollIntoView({block:'start',behavior:'smooth'}); };
+$('pageNumber').onchange = () => { const n=Number($('pageNumber').value); if(Number.isInteger(n)&&n>=1&&n<=Math.max(1,Math.ceil(matchRows.length/PAGE_SIZE))){reviewPage=n;renderReviewPage();}else $('pageNumber').value=reviewPage; };
+['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo','fType'].forEach(id => $(id).addEventListener('input',()=>recomputeMatches(true)));
+$('clearFilters').onclick = () => { ['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo'].forEach(id=>$(id).value='');$('fType').value='any';recomputeMatches(true); };
+$('trashSelected').onclick = trashSelected;
+$('undoTrash').onclick = undoTrash;
+$('applyLabel').onclick = applyLabel;
+countMsgs().then(async n => { if(n){done=n;$('counts').textContent=`${n.toLocaleString()} messages saved from an earlier scan`;} await updateDataAction(); });
+updateDataAction();
 </script>
 </body>
 </html>
