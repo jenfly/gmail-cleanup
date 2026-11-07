@@ -1256,8 +1256,16 @@ function renderStripPreview(m, r, a) {
     add('p', `Message size: ${fmt(a.rawSize)} → about ${fmt(a.newSize)}, freeing about ${fmt(Math.max(0, a.rawSize - a.newSize))}.`);
     const dl = add('button', `Download ${a.remove.length === 1 ? 'it' : 'them'} as a zip`);
     dl.onclick = downloadStripZip;
-    const insertBtn = add('button', 'Insert stripped copy to check…');
-    insertBtn.onclick = insertStrippedCopy;
+    if (buildStrippedRaw(lastPreview.rawBin, a)) {
+      const insertBtn = add('button', 'Insert stripped copy to check…');
+      insertBtn.onclick = () => insertStrippedCopy();
+    } else if (buildStrippedRaw(lastPreview.rawBin, a, { allowWrap: true })) {
+      add('p', 'The attachment sits inside a part whose container would change meaning if a note were added directly (for example, an "alternative" body). This needs an extra wrapping container instead — review the result carefully before trashing the original.', 'muted');
+      const wrapBtn = add('button', 'Build wrapped copy to check…');
+      wrapBtn.onclick = () => insertStrippedCopy({ allowWrap: true });
+    } else {
+      add('p', 'Could not safely rebuild this message’s structure to strip it. Use Copy structure to see why.', 'summary');
+    }
   } else if (!a.unsupported.length) add('p', `Nothing to strip: no attachments of ${fmt(STRIP_MIN_BYTES)} or more.`, 'summary');
   if (a.small.length) add('p', `Left in place, under ${fmt(STRIP_MIN_BYTES)}: ${a.small.length} (${names(a.small)}).`, 'muted');
   if (a.inline.length) add('p', `Inline images left in place: ${a.inline.length} (${fmt(a.inline.reduce((n, x) => n + x.bytes, 0))} in total).`, 'muted');
@@ -1280,7 +1288,7 @@ async function previewStrip() {
   try {
     const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds,threadId`);
     const rawBin = b64urlToBinary(r.raw), analysis = analyzeMime(rawBin);
-    lastPreview = { m, rawBin, analysis, labelIds: r.labelIds, threadId: r.threadId };
+    lastPreview = { m, rawBin, analysis, labelIds: r.labelIds, threadId: r.threadId, sizeEstimate: r.sizeEstimate };
     renderStripPreview(m, r, analysis);
   } catch (e) {
     if (e.message === 'expired') { box.hidden = true; expireForAction(); return; }
@@ -1455,17 +1463,73 @@ function rebuildPart(s, part, removeSet) {
   const header = s.slice(part.start, part.bodyStart);
   return header + kept.map(p => `--${boundary}\r\n` + p + `\r\n`).join('') + `--${boundary}--\r\n`;
 }
-function buildStrippedRaw(s, analysis) {
+// Rebuilds a multipart part's own body (its boundary, its kept children, no note) without
+// touching its headers. Used only by the wrap path below, where this becomes the single
+// child of a brand-new wrapper rather than the top of the message.
+function rebuildMultipartBody(s, part, removeSet) {
+  const ctHdr = part.hdr.find(h => h.name === 'content-type');
+  if (!ctHdr) return null;
+  const boundary = parseHeaderValue(ctHdr.value).params.boundary;
+  if (!boundary) return null;
+  const kept = [];
+  for (const child of part.children) {
+    const r = rebuildPart(s, child, removeSet);
+    if (r === null) return null;
+    if (r !== STRIP_DROP) kept.push(r);
+  }
+  return { ctLine: 'Content-Type: ' + ctHdr.value, body: kept.map(p => `--${boundary}\r\n` + p + `\r\n`).join('') + `--${boundary}--\r\n` };
+}
+// A boundary string guaranteed (by construction, then checked) not to collide with anything
+// already in the message.
+function freshBoundary(s) {
+  for (let i = 0; i < 5; i++) {
+    const b = 'mswrap-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    if (!s.includes(b)) return b;
+  }
+  return null;
+}
+const CT_HEADER_RE_SRC = '^Content-Type:[^\\r\\n]*(?:\\r?\\n[ \\t][^\\r\\n]*)*';
+// Replaces the message's one top-level Content-Type header (including any folded
+// continuation lines) with newValue, leaving every other header's bytes untouched. Returns
+// null — never guesses — unless there is exactly one Content-Type header to replace.
+function rewriteContentType(headerBlock, newValue) {
+  const matches = headerBlock.match(new RegExp(CT_HEADER_RE_SRC, 'img'));
+  if (!matches || matches.length !== 1) return null;
+  return headerBlock.replace(new RegExp(CT_HEADER_RE_SRC, 'im'), 'Content-Type: ' + newValue);
+}
+// Rebuilds the raw message with the attachments in analysis.remove excised and a note part
+// added, keeping every original header and every kept part's bytes untouched, at any nesting
+// depth. Normally the note is added as a direct sibling under the root's own boundary. When
+// the root is multipart/alternative or multipart/related, adding a sibling there would change
+// what the structure means (an extra "alternative" can hide the real content; see the Mail
+// Sweeper handoff notes), so that's refused unless opts.allowWrap is set — in which case the
+// whole original root (stripped, otherwise untouched) is wrapped in a brand-new multipart/mixed
+// alongside the note, which requires rewriting the message's one Content-Type header. This is
+// the only path that rewrites a header rather than copying it; it is never used automatically
+// by the batch pipeline (stripOne never passes allowWrap), only when explicitly requested from
+// a single-message preview for manual review before anything is trashed.
+function buildStrippedRaw(s, analysis, opts = {}) {
   const root = parsePart(s, 0, s.length);
   if (!root.type.startsWith('multipart/')) return null;
-  // Adding the note as a sibling only makes sense at a container whose meaning doesn't
-  // depend on having exactly these children; alternative/related bodies would change
-  // meaning if a plain-text note were added alongside them, so skip rather than guess.
-  if (root.type === 'multipart/alternative' || root.type === 'multipart/related') return null;
+  const removeSet = new Set(analysis.remove.map(x => x.bodyStart + ':' + x.end));
+  const needsWrap = root.type === 'multipart/alternative' || root.type === 'multipart/related';
+  if (needsWrap && !opts.allowWrap) return null;
+
+  if (needsWrap) {
+    const rebuilt = rebuildMultipartBody(s, root, removeSet);
+    if (!rebuilt) return null;
+    const outerBoundary = freshBoundary(s);
+    if (!outerBoundary) return null;
+    const headerBlock = rewriteContentType(s.slice(0, root.bodyStart), `multipart/mixed; boundary="${outerBoundary}"`);
+    if (headerBlock === null) return null;
+    const innerChild = rebuilt.ctLine + '\r\n\r\n' + rebuilt.body;
+    const notePiece = `--${outerBoundary}\r\nContent-Type: text/plain; charset="utf-8"\r\n\r\n\r\n${STRIP_NOTE_TEXT}\r\n`;
+    return headerBlock + `--${outerBoundary}\r\n` + innerChild + `\r\n` + notePiece + `--${outerBoundary}--\r\n`;
+  }
+
   const ctHdr = root.hdr.find(h => h.name === 'content-type');
   const boundary = parseHeaderValue(ctHdr ? ctHdr.value : '').params.boundary;
   if (!boundary) return null;
-  const removeSet = new Set(analysis.remove.map(x => x.bodyStart + ':' + x.end));
   const kept = [];
   for (const child of root.children) {
     const r = rebuildPart(s, child, removeSet);
@@ -1477,7 +1541,44 @@ function buildStrippedRaw(s, analysis) {
   pieces.push(`--${boundary}--\r\n`);
   return s.slice(0, root.bodyStart) + pieces.join('');
 }
-function renderInsertResult(check, origThreadId) {
+// After a verified insert, the original is trashed only when the "Trash the original now"
+// button is pressed — never automatically. It re-checks starred/trashed status in Gmail right
+// before acting (same pattern as trashSelected/stripSelected) and records the pair in
+// stripRunLog so "Undo last strip" covers it the same as a batch run.
+async function trashAfterInsert(m, check, freedBytes, trashBtn) {
+  if (!token) { toast('Tap Connect Gmail first.',{alert:true}); return; }
+  if (stripBusy) { toast('A strip run is already in progress; try again once it finishes.',{alert:true}); return; }
+  const ok = confirm(`Move the original message to Trash now? The stripped copy (id ${check.id}) stays in Gmail either way.`);
+  if (!ok) { toast('Cancelled. Nothing was changed.'); return; }
+  if (trashBtn) trashBtn.disabled = true;
+  toast('Checking starred and trashed status in Gmail…',{sticky:true});
+  try {
+    const [starred, trashed] = await Promise.all([listIds('STARRED'), listIds('TRASH')]);
+    if (starred.has(m.id) || trashed.has(m.id)) {
+      if (starred.has(m.id) && !m.labels.includes('STARRED')) m.labels.push('STARRED');
+      if (trashed.has(m.id) && !m.labels.includes('TRASH')) m.labels.push('TRASH');
+      await putMany([m]); recomputeMatches(false);
+      toast('The original is starred or already in Trash in Gmail, so it was left alone.',{alert:true});
+      if (trashBtn) trashBtn.disabled = false;
+      return;
+    }
+    toast('Moving the original to Trash…',{sticky:true});
+    await bulkTrash([m.id], false, cacheMarker('TRASH', true));
+    const stripLog = (await getMeta('stripLog')) || {};
+    delete stripLog[m.id]; await setMeta('stripLog', stripLog);
+    const log = (await getMeta('stripRunLog')) || [];
+    log.push({ at: Date.now(), pairs: [{ originalId: m.id, copyId: check.id, bytes: freedBytes || 0 }] });
+    await setMeta('stripRunLog', log.slice(-10));
+    recomputeMatches(false); await updateTrashInfo();
+    toast('Original moved to Trash. Undo last strip can restore it if needed.');
+    $('stripPreview').hidden = true; lastPreview = null;
+  } catch (e) {
+    if (e.message === 'expired') { expireForAction(); return; }
+    toast('Could not trash the original: ' + e.message,{alert:true});
+    if (trashBtn) trashBtn.disabled = false;
+  }
+}
+function renderInsertResult(check, origThreadId, m, freedBytes) {
   const box = $('stripPreview'), closeBtn = $('stripPreviewClose');
   const add = (tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if (cls) n.className = cls; box.insertBefore(n, closeBtn); return n; };
   add('h2', 'Stripped copy inserted');
@@ -1487,21 +1588,35 @@ function renderInsertResult(check, origThreadId) {
   add('p', `Labels on the copy: ${(check.labelIds || []).join(', ') || '(none)'}`, 'muted');
   add('p', `Copy size: ${fmt(check.sizeEstimate || 0)}`, 'muted');
   add('p', 'The original message was not changed or trashed. Check the copy in Gmail — date, thread placement, read state and the note text — before anything else.', 'hint');
+  const trashBtn = add('button', 'Trash the original now');
+  trashBtn.onclick = () => trashAfterInsert(m, check, freedBytes, trashBtn);
   box.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
-async function insertStrippedCopy() {
+// Rebuilds and inserts a check copy (no trash — see trashAfterInsert for that). opts.allowWrap
+// lets this use the wrap path for an alternative/related root; it is only ever set here, from
+// an explicit button in the single-message preview, never from the batch pipeline. A
+// successful, verified insert is recorded in meta.stripLog exactly like stripOne's does, so a
+// later "Strip attachments from selected…" run on this same message resumes straight to
+// trashing instead of inserting a second copy, same as resuming after an interrupted batch run.
+async function insertStrippedCopy(opts = {}) {
   if (!lastPreview || !lastPreview.analysis.remove.length) return;
-  const { rawBin, analysis, labelIds, threadId } = lastPreview;
-  const newRaw = buildStrippedRaw(rawBin, analysis);
+  const { m, rawBin, analysis, labelIds, threadId, sizeEstimate } = lastPreview;
+  const newRaw = buildStrippedRaw(rawBin, analysis, opts);
   if (!newRaw) { toast('Could not safely rebuild this message’s structure; skipped. Use Copy structure to see why.',{alert:true}); return; }
-  const ok = confirm('Insert a stripped copy of this message into Gmail so you can check it? The original will not be changed or trashed.');
+  const wrapNote = opts.allowWrap ? ' This uses the wrap method (an extra container around the whole message) — check extra carefully that the original content still shows, not just that the attachment is gone.' : '';
+  const ok = confirm('Insert a stripped copy of this message into Gmail so you can check it?' + wrapNote + ' The original will not be changed or trashed.');
   if (!ok) { toast('Cancelled. Nothing was changed.'); return; }
   toast('Inserting the stripped copy…',{sticky:true});
   try {
     const body = { raw: binaryToB64url(newRaw), labelIds: labelIds || [], threadId };
     const inserted = await api('/messages?internalDateSource=dateHeader', { method: 'POST', body: JSON.stringify(body) });
     const check = await api(`/messages/${inserted.id}?format=metadata&fields=id,threadId,labelIds,sizeEstimate`);
-    renderInsertResult(check, threadId);
+    const freedBytes = Math.max(0, (sizeEstimate || m.size) - (check.sizeEstimate || 0));
+    const stripLog = (await getMeta('stripLog')) || {};
+    stripLog[m.id] = { state: 'inserted', copyId: check.id, freedBytes, at: Date.now() };
+    await setMeta('stripLog', stripLog);
+    await putMany([{ id: check.id, from: m.from, date: m.date, size: check.sizeEstimate || 0, labels: check.labelIds || [] }]);
+    renderInsertResult(check, threadId, m, freedBytes);
     toast('Inserted. Check it in Gmail before doing anything else — the original was not touched.');
   } catch (e) {
     if (e.message === 'expired') { expireForAction(); return; }
@@ -1536,7 +1651,14 @@ async function stripOne(m) {
     if (analysis.unsupported.length) return { status: 'skipped', detail: analysis.unsupported.join('; '), rawBin, analysis };
     if (!analysis.remove.length) return { status: 'skipped', detail: `no attachment of ${fmt(STRIP_MIN_BYTES)} or more`, rawBin, analysis };
     const newRaw = buildStrippedRaw(rawBin, analysis);
-    if (!newRaw) return { status: 'skipped', detail: 'could not safely rebuild this message’s structure', rawBin, analysis };
+    if (!newRaw) {
+      // The batch pipeline never uses the wrap path (opts.allowWrap is never passed here) —
+      // a message that needs it is always reported and left alone, however many messages are
+      // in the run, so it can be reviewed individually from the single-message preview.
+      const root = parsePart(rawBin, 0, rawBin.length);
+      const needsWrap = (root.type === 'multipart/alternative' || root.type === 'multipart/related') && !!buildStrippedRaw(rawBin, analysis, { allowWrap: true });
+      return { status: 'skipped', detail: needsWrap ? 'needs an extra wrapping step — review it individually (Preview → Build wrapped copy to check…)' : 'could not safely rebuild this message’s structure', rawBin, analysis };
+    }
 
     // Download before anything in Gmail changes, so nothing is lost if a later step fails.
     const names = dedupeNames(analysis.remove.map(x => safeName(x.name)));
