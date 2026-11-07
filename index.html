@@ -1007,6 +1007,16 @@ const STRIP_MIN_BYTES = 50 * 1024; // attachments smaller than this are left in 
 const STRIP_NOTE_TEXT = 'Attachments were removed from this message to save space and saved elsewhere.';
 const STRIP_NOTE_BYTES = 200 + STRIP_NOTE_TEXT.length; // rough size of the note part a stripped copy would carry
 const STRIP_UNSAFE = ['multipart/signed', 'multipart/encrypted', 'application/pkcs7-mime', 'application/x-pkcs7-mime', 'application/pgp-encrypted'];
+const STRIP_REVIEW_LABEL_NAME = 'Mail Sweeper review';
+let stripReviewLabelId = null; // cached id for STRIP_REVIEW_LABEL_NAME, once looked up or created
+// Finds (or creates) the label every "check copy" preview-insert gets, so copies waiting on
+// manual review are easy to find/search in Gmail instead of having to be hunted down by thread.
+// Non-fatal: if this fails, the copy is still inserted, just without the extra label.
+async function ensureStripReviewLabel() {
+  if (stripReviewLabelId) return stripReviewLabelId;
+  stripReviewLabelId = await ensureLabel(STRIP_REVIEW_LABEL_NAME);
+  return stripReviewLabelId;
+}
 
 // MIME analysis works on a binary string (one char per byte) so offsets match the original bytes.
 function b64urlToBinary(s) {
@@ -1585,13 +1595,14 @@ async function trashAfterInsert(m, check, freedBytes, trashBtn) {
     if (trashBtn) trashBtn.disabled = false;
   }
 }
-function renderInsertResult(check, origThreadId, m, freedBytes) {
+function renderInsertResult(check, origThreadId, m, freedBytes, labeled) {
   const box = $('stripPreview'), closeBtn = $('stripPreviewClose');
   const add = (tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if (cls) n.className = cls; box.insertBefore(n, closeBtn); return n; };
   add('h2', 'Stripped copy inserted');
   add('p', `New message id: ${check.id}`, 'summary');
   const sameThread = check.threadId === origThreadId;
   add('p', `Same thread as original: ${sameThread ? 'yes' : 'no — check this in Gmail'}`, sameThread ? 'muted' : 'summary');
+  add('p', labeled ? `Find it in Gmail with the label "${STRIP_REVIEW_LABEL_NAME}".` : `Could not add the "${STRIP_REVIEW_LABEL_NAME}" label — you'll need to find it another way.`, 'summary');
   add('p', `Labels on the copy: ${(check.labelIds || []).join(', ') || '(none)'}`, 'muted');
   add('p', `Copy size: ${fmt(check.sizeEstimate || 0)}`, 'muted');
   add('p', 'The original message was not changed or trashed. Check the copy in Gmail — date, thread placement, read state and the note text — before anything else.', 'hint');
@@ -1615,16 +1626,21 @@ async function insertStrippedCopy(opts = {}) {
   if (!ok) { toast('Cancelled. Nothing was changed.'); return; }
   toast('Inserting the stripped copy…',{sticky:true});
   try {
-    const body = { raw: binaryToB64url(newRaw), labelIds: labelIds || [], threadId };
+    let reviewLabelId = null;
+    try { reviewLabelId = await ensureStripReviewLabel(); }
+    catch (e) { if (e.message === 'expired') throw e; /* non-fatal: insert still proceeds, just without the review label */ }
+    const insertLabelIds = Array.from(new Set([...(labelIds || []), ...(reviewLabelId ? [reviewLabelId] : [])]));
+    const body = { raw: binaryToB64url(newRaw), labelIds: insertLabelIds, threadId };
     const inserted = await api('/messages?internalDateSource=dateHeader', { method: 'POST', body: JSON.stringify(body) });
     const check = await api(`/messages/${inserted.id}?format=metadata&fields=id,threadId,labelIds,sizeEstimate`);
     const freedBytes = Math.max(0, (sizeEstimate || m.size) - (check.sizeEstimate || 0));
+    const labeled = !!(reviewLabelId && (check.labelIds || []).includes(reviewLabelId));
     const stripLog = (await getMeta('stripLog')) || {};
     stripLog[m.id] = { state: 'inserted', copyId: check.id, freedBytes, at: Date.now() };
     await setMeta('stripLog', stripLog);
     await putMany([{ id: check.id, from: m.from, date: m.date, size: check.sizeEstimate || 0, labels: check.labelIds || [] }]);
-    renderInsertResult(check, threadId, m, freedBytes);
-    toast('Inserted. Check it in Gmail before doing anything else — the original was not touched.');
+    renderInsertResult(check, threadId, m, freedBytes, labeled);
+    toast(labeled ? `Inserted and labeled "${STRIP_REVIEW_LABEL_NAME}" so you can find it in Gmail. Check it before doing anything else — the original was not touched.` : 'Inserted, but could not add the review label — check it in Gmail before doing anything else. The original was not touched.',{alert:!labeled});
   } catch (e) {
     if (e.message === 'expired') { expireForAction(); return; }
     toast('Insert failed: ' + e.message + '. The original was not touched.',{alert:true});
