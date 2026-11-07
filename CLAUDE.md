@@ -59,7 +59,7 @@ There is no test suite in the repo. What has worked:
 ## Working on this repo
 
 - Locally, serve the project on its own port. A service worker from another app on the same port once hijacked the page. After deploying, hard refresh (the service worker is network-first, but the first load installs it).
-- Changes have been delivered as numbered patches that Jennifer applies herself with `git am`. Base each on a fresh clone of `main`, export with `git format-patch -1 --start-number N`, and check the patch applies cleanly on another fresh clone. Check `git log` for the latest number, and give the patch file to her explicitly along with a clear "apply this patch" instruction.
+- In chat sessions (no repo access), changes are delivered as numbered patches that Jennifer applies with `git am`: base each on a fresh clone of `main`, export with `git format-patch -1 --start-number N`, check it applies cleanly on another fresh clone, and give her the file with a clear "apply this patch" instruction. Check `git log` for the latest number (patches 0001 to 0014 are applied). In Claude Code sessions, patches are not needed: commit directly in the repo.
 - Keep changes small and focused; one concern per patch where practical.
 - Keep explanations short. A plain list of what changed is enough.
 
