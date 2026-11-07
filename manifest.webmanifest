@@ -1,6 +1,6 @@
 {
-  "name": "Mail sweeper",
-  "short_name": "Mail sweeper",
+  "name": "Mail Sweeper",
+  "short_name": "Mail Sweeper",
   "id": "./",
   "start_url": "./",
   "scope": "./",

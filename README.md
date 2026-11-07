@@ -1,4 +1,4 @@
-# Mail sweeper
+# Mail Sweeper
 
 A browser-only tool for finding what's taking up space in your Gmail archive. It scans message metadata (sender, date, size, labels), caches it in your browser's IndexedDB, and reports storage by sender. Nothing is sent anywhere except to Google's Gmail API.
 
@@ -17,7 +17,7 @@ You need your own OAuth client ID so the page can sign in to your Gmail.
 
 ### 3. Configure the consent screen
 1. Open **APIs & Services > OAuth consent screen** (shown as **Google Auth Platform** in newer consoles) and click **Get started** if prompted.
-2. Enter an app name (e.g. `Mail sweeper`) and your email as the support contact.
+2. Enter an app name (e.g. `Mail Sweeper`) and your email as the support contact.
 3. Set the audience to **External**.
 4. Add your email as the developer contact, then finish.
 5. Under **Audience**, confirm the publishing status is **Testing**, and add your own Gmail address under **Test users**.
@@ -67,7 +67,7 @@ If you test locally, give each project its own port (for example `python3 -m htt
 
 ## First sign-in
 
-Google will show an **"unverified app"** warning because the app is in Testing mode. Click **Advanced > Go to Mail sweeper (unsafe)**, then grant access. This is expected for your own personal project.
+Google will show an **"unverified app"** warning because the app is in Testing mode. Click **Advanced > Go to Mail Sweeper (unsafe)**, then grant access. This is expected for your own personal project.
 
 ## Using it
 
