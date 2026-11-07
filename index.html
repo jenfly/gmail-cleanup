@@ -942,7 +942,8 @@ async function undoTrash() {
 // Nothing in this section writes to Gmail. It reads one message (format=raw), works out which
 // attachments a strip would remove, and shows the result.
 const STRIP_MIN_BYTES = 50 * 1024; // attachments smaller than this are left in place
-const STRIP_NOTE_BYTES = 400;      // rough size of the note part a stripped copy would carry
+const STRIP_NOTE_TEXT = 'Attachments were removed from this message to save space and saved elsewhere.';
+const STRIP_NOTE_BYTES = 200 + STRIP_NOTE_TEXT.length; // rough size of the note part a stripped copy would carry
 const STRIP_UNSAFE = ['multipart/signed', 'multipart/encrypted', 'application/pkcs7-mime', 'application/x-pkcs7-mime', 'application/pgp-encrypted'];
 
 // MIME analysis works on a binary string (one char per byte) so offsets match the original bytes.
@@ -1137,11 +1138,13 @@ function renderStripPreview(m, r, a) {
     add('p', `Message size: ${fmt(a.rawSize)} → about ${fmt(a.newSize)}, freeing about ${fmt(Math.max(0, a.rawSize - a.newSize))}.`);
     const dl = add('button', `Download ${a.remove.length === 1 ? 'it' : 'them'} as a zip`);
     dl.onclick = downloadStripZip;
+    const insertBtn = add('button', 'Insert stripped copy to check…');
+    insertBtn.onclick = insertStrippedCopy;
   } else if (!a.unsupported.length) add('p', `Nothing to strip: no attachments of ${fmt(STRIP_MIN_BYTES)} or more.`, 'summary');
   if (a.small.length) add('p', `Left in place, under ${fmt(STRIP_MIN_BYTES)}: ${a.small.length} (${names(a.small)}).`, 'muted');
   if (a.inline.length) add('p', `Inline images left in place: ${a.inline.length} (${fmt(a.inline.reduce((n, x) => n + x.bytes, 0))} in total).`, 'muted');
   add('p', 'Preview only. Nothing was changed in Gmail.', 'hint');
-  const close = add('button', 'Close preview'); close.onclick = () => { box.hidden = true; lastPreview = null; };
+  const close = add('button', 'Close preview'); close.id = 'stripPreviewClose'; close.onclick = () => { box.hidden = true; lastPreview = null; };
   box.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 async function previewStrip() {
@@ -1155,9 +1158,9 @@ async function previewStrip() {
   box.replaceChildren(); box.hidden = false;
   const note = document.createElement('p'); note.textContent = 'Reading the message from Gmail…'; box.append(note);
   try {
-    const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds`);
+    const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds,threadId`);
     const rawBin = b64urlToBinary(r.raw), analysis = analyzeMime(rawBin);
-    lastPreview = { m, rawBin, analysis };
+    lastPreview = { m, rawBin, analysis, labelIds: r.labelIds, threadId: r.threadId };
     renderStripPreview(m, r, analysis);
   } catch (e) {
     if (e.message === 'expired') { box.hidden = true; expireForAction(); return; }
@@ -1293,6 +1296,67 @@ function downloadStripZip() {
   const zip = buildZip(entries);
   triggerDownload(zipFileName(m, analysis.subject), zip);
   say(`Downloaded ${msgs(entries.length)} as a zip. Nothing was changed in Gmail.`);
+}
+/* ---------- Strip attachments, stage 3: insert a stripped copy (verify only, no trash) ---------- */
+// Inserts a real copy into Gmail so it can be checked by hand; the original is never touched
+// or trashed here (that's stage 4, once this has been verified against real Gmail).
+function binaryToB64url(bin) {
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+// Rebuilds the raw message with the attachments in analysis.remove excised and a note part
+// added, keeping every original header and every kept part's bytes untouched. Only handles
+// attachments that are direct children of the top-level multipart (the common case); returns
+// null if any removable attachment is nested deeper, so the caller can skip and report it
+// rather than guess at a riskier splice.
+function buildStrippedRaw(s, analysis) {
+  const root = parsePart(s, 0, s.length);
+  if (!root.type.startsWith('multipart/') || !root.children.length) return null;
+  const removeKeys = new Set(analysis.remove.map(x => x.bodyStart + ':' + x.end));
+  let matched = 0;
+  const kept = [];
+  root.children.forEach(c => {
+    if (removeKeys.has(c.bodyStart + ':' + c.end)) { matched++; return; }
+    kept.push(c);
+  });
+  if (matched !== analysis.remove.length) return null; // a target wasn't a direct child: too risky to splice
+  const ctHdr = root.hdr.find(h => h.name === 'content-type');
+  const boundary = parseHeaderValue(ctHdr ? ctHdr.value : '').params.boundary;
+  if (!boundary) return null;
+  const pieces = kept.map(c => `--${boundary}\r\n` + s.slice(c.start, c.end) + `\r\n`);
+  pieces.push(`--${boundary}\r\nContent-Type: text/plain; charset="utf-8"\r\n\r\n${STRIP_NOTE_TEXT}\r\n`);
+  pieces.push(`--${boundary}--\r\n`);
+  return s.slice(0, root.bodyStart) + pieces.join('');
+}
+function renderInsertResult(check, origThreadId) {
+  const box = $('stripPreview'), closeBtn = $('stripPreviewClose');
+  const add = (tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if (cls) n.className = cls; box.insertBefore(n, closeBtn); return n; };
+  add('h2', 'Stripped copy inserted');
+  add('p', `New message id: ${check.id}`, 'summary');
+  const sameThread = check.threadId === origThreadId;
+  add('p', `Same thread as original: ${sameThread ? 'yes' : 'no — check this in Gmail'}`, sameThread ? 'muted' : 'summary');
+  add('p', `Labels on the copy: ${(check.labelIds || []).join(', ') || '(none)'}`, 'muted');
+  add('p', `Copy size: ${fmt(check.sizeEstimate || 0)}`, 'muted');
+  add('p', 'The original message was not changed or trashed. Check the copy in Gmail — date, thread placement, read state and the note text — before anything else.', 'hint');
+  box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+async function insertStrippedCopy() {
+  if (!lastPreview || !lastPreview.analysis.remove.length) return;
+  const { rawBin, analysis, labelIds, threadId } = lastPreview;
+  const newRaw = buildStrippedRaw(rawBin, analysis);
+  if (!newRaw) { say('Could not safely rebuild this message (an attachment is nested too deep); skipped.', true); return; }
+  const ok = confirm('Insert a stripped copy of this message into Gmail so you can check it? The original will not be changed or trashed.');
+  if (!ok) { say('Cancelled. Nothing was changed.'); return; }
+  say('Inserting the stripped copy…');
+  try {
+    const body = { raw: binaryToB64url(newRaw), labelIds: labelIds || [], threadId };
+    const inserted = await api('/messages?internalDateSource=dateHeader', { method: 'POST', body: JSON.stringify(body) });
+    const check = await api(`/messages/${inserted.id}?format=metadata&fields=id,threadId,labelIds,sizeEstimate`);
+    renderInsertResult(check, threadId);
+    say('Inserted. Check it in Gmail before doing anything else — the original was not touched.');
+  } catch (e) {
+    if (e.message === 'expired') { expireForAction(); return; }
+    say('Insert failed: ' + e.message + '. The original was not touched.', true);
+  }
 }
 async function updateDataAction() {
   const meta=(await getMeta('scan'))||{},history=await getMeta('history');
