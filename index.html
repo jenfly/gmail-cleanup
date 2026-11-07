@@ -65,19 +65,19 @@
   #selectionSummary { font-weight:650; margin:10px 0; }
   #actions { position:fixed; z-index:5; left:0; right:0; bottom:calc(64px + env(safe-area-inset-bottom)); background:var(--bg); border-top:1px solid var(--line); padding:8px max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
   #actionInner { max-width:648px; margin:0 auto; display:flex; gap:8px; }
-  #toast { position:fixed; z-index:5; left:0; right:0; bottom:calc(64px + env(safe-area-inset-bottom) + 68px); padding:0 max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
+  #toast { position:fixed; z-index:8; left:0; right:0; bottom:calc(64px + env(safe-area-inset-bottom) + 68px); padding:0 max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
   #toast[hidden] { display:none; }
-  #toastInner { max-width:648px; margin:0 auto; display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.9); border:1px solid var(--line); border-radius:10px; padding:10px 10px 10px 14px; box-shadow:0 4px 18px #14232b22; }
-  #toastText { flex:1; min-width:0; overflow-wrap:anywhere; margin:0; }
-  #toast.alert #toastText { color:var(--ink); font-weight:650; }
-  #toastClose { flex:none; width:48px; height:48px; min-height:48px; padding:0; font-size:1.1rem; border-radius:50%; }
+  #toastInner { max-width:648px; margin:0 auto; display:flex; align-items:center; gap:10px; background:var(--ink); border:1px solid var(--ink); border-radius:10px; padding:10px 10px 10px 14px; box-shadow:0 4px 18px #14232b44; }
+  #toastText { flex:1; min-width:0; overflow-wrap:anywhere; margin:0; color:#fff; }
+  #toast.alert #toastInner { background:#8a2c2c; border-color:#8a2c2c; }
+  #toast.alert #toastText { font-weight:650; }
+  #toastClose { flex:none; width:48px; height:48px; min-height:48px; padding:0; font-size:1.1rem; border-radius:50%; border-color:rgba(255,255,255,.5); color:#fff; }
   #trashSelected { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #moreActions { position:relative; flex:none; width:48px; min-width:48px; height:48px; padding:0; font-size:1.4rem; }
   #moreMenu { position:absolute; right:0; bottom:54px; width:min(290px,calc(100vw - 32px)); padding:12px; background:var(--bg); border:1px solid var(--line); border-radius:10px; box-shadow:0 4px 18px #14232b22; }
   #moreMenu[hidden] { display:none; }
   #moreMenu button { width:100%; margin-top:8px; }
-  #optional { margin-top:10px; }
-  #optional label { display:block; margin-top:8px; color:var(--muted); }
+  #moreMenu label { display:block; margin-top:10px; color:var(--muted); }
   #reviewTab { padding-bottom:132px; }
   #reviewListPanel { padding-bottom:10px; }
   #reviewFilters summary { list-style:none; gap:.4em; }
@@ -205,11 +205,8 @@
         <button id="previewStrip">Preview strip attachments…</button>
         <button id="stripSelectedBtn">Strip attachments from selected…</button>
         <button id="undoStripBtn">Undo last strip</button>
-        <details id="optional">
-          <summary>Add Gmail label…</summary>
-          <label>Label name <input id="fLabel" type="text" value="Sweeper review"></label>
-          <button id="applyLabel">Apply label to selected</button>
-        </details>
+        <label>Label name <input id="fLabel" type="text" value="Sweeper review"></label>
+        <button id="applyLabel">Apply label to selected</button>
       </div>
     </div>
   </section>
