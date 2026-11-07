@@ -756,12 +756,15 @@ function renderSpace(all) {
 async function renderExplore() {
   const all=await everything();
   if(!all.length){renderResultRows([]);return;}
+  // Trashed and spam messages are excluded here too, matching "Where's the space?" and Review's
+  // own filters: once something is trashed there's nothing left to reclaim from it.
+  const eligible=all.filter(m=>!m.labels.includes('TRASH')&&!m.labels.includes('SPAM'));
   if(exploreMode==='senders') {
-    const by=new Map(); all.forEach(m=>{const g=by.get(m.from)||{n:0,bytes:0};g.n++;g.bytes+=m.size;by.set(m.from,g);});
+    const by=new Map(); eligible.forEach(m=>{const g=by.get(m.from)||{n:0,bytes:0};g.n++;g.bytes+=m.size;by.set(m.from,g);});
     const rows=[...by.entries()].sort((a,b)=>b[1].bytes-a[1].bytes).slice(0,25).map(([from,g])=>({label:from,bytes:g.bytes,num:msgs(g.n),filter:{sender:from}}));
     renderResultRows(rows);
   } else if(exploreMode==='biggest') {
-    const rows=[...all].sort((a,b)=>b.size-a.size).slice(0,25).map(m=>({label:m.from,sub:when(m)+(m.labels.includes('SENT')?' · sent':''),bytes:m.size,num:'Open review for this sender',filter:{sender:m.from,sizeFrom:m.size/1024**2}}));
+    const rows=[...eligible].sort((a,b)=>b.size-a.size).slice(0,25).map(m=>({label:m.from,sub:when(m)+(m.labels.includes('SENT')?' · sent':''),bytes:m.size,num:'Open review for this sender',filter:{sender:m.from,sizeFrom:m.size/1024**2}}));
     renderResultRows(rows);
   } else renderResultRows(renderSpace(all));
 }
