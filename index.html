@@ -1331,7 +1331,7 @@ function buildStrippedRaw(s, analysis) {
   const boundary = parseHeaderValue(ctHdr ? ctHdr.value : '').params.boundary;
   if (!boundary) return null;
   const pieces = kept.map(c => `--${boundary}\r\n` + s.slice(c.start, c.end) + `\r\n`);
-  pieces.push(`--${boundary}\r\nContent-Type: text/plain; charset="utf-8"\r\n\r\n${STRIP_NOTE_TEXT}\r\n`);
+  pieces.push(`--${boundary}\r\nContent-Type: text/plain; charset="utf-8"\r\n\r\n\r\n${STRIP_NOTE_TEXT}\r\n`);
   pieces.push(`--${boundary}--\r\n`);
   return s.slice(0, root.bodyStart) + pieces.join('');
 }
@@ -1467,6 +1467,7 @@ async function stripSelected() {
     }
     keepAwake(false);
     stopBtn.hidden = true;
+    const closeBtn = add('button', 'Close'); closeBtn.onclick = () => { box.hidden = true; };
 
     if (pairs.length) {
       const log = (await getMeta('stripRunLog')) || [];
