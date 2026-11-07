@@ -65,6 +65,12 @@
   #selectionSummary { font-weight:650; margin:10px 0; }
   #actions { position:fixed; z-index:5; left:0; right:0; bottom:calc(64px + env(safe-area-inset-bottom)); background:var(--bg); border-top:1px solid var(--line); padding:8px max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
   #actionInner { max-width:648px; margin:0 auto; display:flex; gap:8px; }
+  #toast { position:fixed; z-index:5; left:0; right:0; bottom:calc(64px + env(safe-area-inset-bottom) + 68px); padding:0 max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
+  #toast[hidden] { display:none; }
+  #toastInner { max-width:648px; margin:0 auto; display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.9); border:1px solid var(--line); border-radius:10px; padding:10px 10px 10px 14px; box-shadow:0 4px 18px #14232b22; }
+  #toastText { flex:1; min-width:0; overflow-wrap:anywhere; margin:0; }
+  #toast.alert #toastText { color:var(--ink); font-weight:650; }
+  #toastClose { flex:none; width:48px; height:48px; min-height:48px; padding:0; font-size:1.1rem; border-radius:50%; }
   #trashSelected { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #moreActions { position:relative; flex:none; width:48px; min-width:48px; height:48px; padding:0; font-size:1.4rem; }
   #moreMenu { position:absolute; right:0; bottom:54px; width:min(290px,calc(100vw - 32px)); padding:12px; background:var(--bg); border:1px solid var(--line); border-radius:10px; box-shadow:0 4px 18px #14232b22; }
@@ -183,6 +189,12 @@
         <button id="nextPage" disabled>Next →</button>
       </nav>
     </div>
+    <div id="toast" hidden aria-live="polite">
+      <div id="toastInner">
+        <p id="toastText"></p>
+        <button id="toastClose" aria-label="Dismiss">✕</button>
+      </div>
+    </div>
     <div id="actions">
       <div id="actionInner">
         <button id="trashSelected" class="danger" disabled>Trash 0</button>
@@ -226,6 +238,18 @@ const say = (t, alert = false) => {
   const attention = alert || running || syncing;
   document.body.classList.toggle('status-attention', attention);
 };
+// One-off feedback for a Review-tab action (confirmation, error, or in-flight progress).
+// Never touches #status, so it can't leak onto another tab or resurface later.
+const TOAST_MS = 4000;
+let toastTimer = null;
+function toast(t, { alert = false, sticky = false } = {}) {
+  clearTimeout(toastTimer); toastTimer = null;
+  $('toastText').textContent = t;
+  $('toast').classList.toggle('alert', alert);
+  $('toast').hidden = false;
+  if (!sticky && !alert) toastTimer = setTimeout(() => { $('toast').hidden = true; }, TOAST_MS);
+}
+function hideToast() { clearTimeout(toastTimer); toastTimer = null; $('toast').hidden = true; }
 function updateStatusVisibility() {
   document.body.dataset.tab = activeTab;
   document.body.classList.toggle('status-attention', !!(running || syncing || $('status').classList.contains('alert')));
@@ -650,6 +674,7 @@ function switchTab(name) {
   const previous = activeTab;
   activeTab = name;
   document.body.dataset.tab = name;
+  if (previous === 'review' && name !== 'review') hideToast();
   if (name === 'review') {
     if (reviewEntryFromExplore) $('reviewFilters').open = false;
     else if (!reviewVisited) $('reviewFilters').open = true;
@@ -856,7 +881,7 @@ async function batchLabel(ids,body,onBatch) {
     const part=ids.slice(i,i+1000);
     await api('/messages/batchModify',{method:'POST',body:JSON.stringify({ids:part,...body})});
     if(onBatch) await onBatch(part); // Gmail accepted this batch: record it now, in case a later one fails
-    say(`Working… ${Math.min(i+1000,ids.length).toLocaleString()} of ${ids.length.toLocaleString()}`);
+    toast(`Working… ${Math.min(i+1000,ids.length).toLocaleString()} of ${ids.length.toLocaleString()}`,{sticky:true});
   }
 }
 // Returns a function that adds/removes a label on the cached copies of the given message ids and saves them.
@@ -876,9 +901,9 @@ function cacheMarker(label,add) {
 const labelName=()=>$('fLabel').value.trim();
 async function applyLabel() {
   const name=labelName(), rows=selectedRows();
-  if(!token){say('Tap Connect Gmail first.',true);return;} if(!name){say('Enter a label name.',true);return;} if(!rows.length){say('No messages are selected.');return;}
-  try {const id=await ensureLabel(name);await batchLabel(rows.map(m=>m.id),{addLabelIds:[id]},cacheMarker(id,true));say(`Added "${name}" to ${msgs(rows.length)} selected messages.`);}
-  catch(e){if(e.message==='expired')expireForAction();else say('Labelling stopped: '+e.message,true);}
+  if(!token){toast('Tap Connect Gmail first.',{alert:true});return;} if(!name){toast('Enter a label name.',{alert:true});return;} if(!rows.length){toast('No messages are selected.',{alert:true});return;}
+  try {const id=await ensureLabel(name);await batchLabel(rows.map(m=>m.id),{addLabelIds:[id]},cacheMarker(id,true));toast(`Added "${name}" to ${msgs(rows.length)}.`);}
+  catch(e){if(e.message==='expired')expireForAction();else toast('Labelling stopped: '+e.message,{alert:true});}
 }
 // onDone(ids) is called as soon as Gmail has accepted a batch (or a group of single messages),
 // so callers can keep the local cache in step even if a later batch fails.
@@ -895,16 +920,16 @@ async function bulkTrash(ids,undo,onDone=async()=>{}) {
     for(const id of rest){
       try{await api(`/messages/${id}/${undo?'untrash':'trash'}`,{method:'POST'});buf.push(id);}catch(e){if(e.status!==404)throw e;}
       if(buf.length>=50) await flush();
-      if(++n%50===0)say(`Working… ${(ids.length-rest.length+n).toLocaleString()} of ${ids.length.toLocaleString()}`);
+      if(++n%50===0)toast(`Working… ${(ids.length-rest.length+n).toLocaleString()} of ${ids.length.toLocaleString()}`,{sticky:true});
     }
   } finally {await flush();}
 }
 async function trashSelected() {
   const chosen=selectedRows();
-  if(!token){say('Tap Connect Gmail first.',true);return;}
-  if(!chosen.length){say('No messages are selected.');return;}
+  if(!token){toast('Tap Connect Gmail first.',{alert:true});return;}
+  if(!chosen.length){toast('No messages are selected.');return;}
   try {
-    say('Checking starred and trashed messages in Gmail…');
+    toast('Checking starred and trashed messages in Gmail…',{sticky:true});
     const [starred,trashed]=await Promise.all([listIds('STARRED'),listIds('TRASH')]);
     const skipped=chosen.filter(m=>starred.has(m.id)||trashed.has(m.id));
     skipped.forEach(m=>{
@@ -914,10 +939,10 @@ async function trashSelected() {
     if(skipped.length){await putMany(skipped);recomputeMatches(false);}
     const rows=chosen.filter(m=>!starred.has(m.id)&&!trashed.has(m.id));
     const ids=rows.map(m=>m.id),bytes=rows.reduce((n,m)=>n+m.size,0);
-    if(!ids.length){recomputeMatches(false);await updateTrashInfo();say('No selected messages remain eligible. Starred and already-trashed messages were skipped.');return;}
+    if(!ids.length){recomputeMatches(false);await updateTrashInfo();toast('No selected messages remain eligible. Starred and already-trashed messages were skipped.');return;}
     const ok=confirm(`Move ${msgs(ids.length)} (${fmt(bytes)}) to Gmail Trash? Starred and already-trashed messages are excluded.${skipped.length?`\n\n${msgs(skipped.length)} newly starred or trashed messages were skipped.`:''} You can undo this from the Review tab.`);
-    if(!ok){say('Cancelled. Nothing was changed.');return;}
-    say('Moving selected messages to Trash…');
+    if(!ok){toast('Cancelled. Nothing was changed.');return;}
+    toast('Moving selected messages to Trash…',{sticky:true});
     const moved=[],sizes=new Map(rows.map(m=>[m.id,m.size])),mark=cacheMarker('TRASH',true);
     let failure=null;
     try {await bulkTrash(ids,false,async part=>{moved.push(...part);await mark(part);});}
@@ -928,18 +953,18 @@ async function trashSelected() {
     recomputeMatches(false);await updateTrashInfo();
     if(failure){
       if(failure.message==='expired'){expireForAction();return;}
-      say(`Trash stopped after moving ${msgs(moved.length)} of ${ids.length.toLocaleString()}: ${failure.message}. Those are already in Trash and gone from this list. Sync with Gmail before retrying.`,true);return;
+      toast(`Trash stopped after moving ${msgs(moved.length)} of ${ids.length.toLocaleString()}: ${failure.message}. Those are already in Trash and gone from this list. Sync with Gmail before retrying.`,{alert:true});return;
     }
-    say(`Moved ${msgs(moved.length)} (${fmt(moved.reduce((n,id)=>n+(sizes.get(id)||0),0))}) to Trash. Empty Trash in Gmail to free the space.`);
-  } catch(e){if(e.message==='expired')expireForAction();else say('Trash stopped: '+e.message+'. Sync with Gmail before retrying.',true);}
+    toast(`Moved ${msgs(moved.length)} (${fmt(moved.reduce((n,id)=>n+(sizes.get(id)||0),0))}) to Trash. Empty Trash in Gmail to free the space.`);
+  } catch(e){if(e.message==='expired')expireForAction();else toast('Trash stopped: '+e.message+'. Sync with Gmail before retrying.',{alert:true});}
 }
 async function undoTrash() {
-  if(!token){say('Tap Connect Gmail first.',true);return;}
+  if(!token){toast('Tap Connect Gmail first.',{alert:true});return;}
   try {
-    const log=(await getMeta('trashLog'))||[],last=log[log.length-1];if(!last){say('Nothing to undo.');return;}
-    say('Checking Gmail Trash…');const inTrash=await listIds('TRASH'),ids=last.ids.filter(id=>inTrash.has(id));
-    if(!ids.length){await setMeta('trashLog',log.slice(0,-1));say('None of those messages are still in Trash.');return;}
-    const ok=confirm(`Restore ${msgs(ids.length)} from the last trash run?`);if(!ok){say('Cancelled. Nothing was changed.');return;}
+    const log=(await getMeta('trashLog'))||[],last=log[log.length-1];if(!last){toast('Nothing to undo.');return;}
+    toast('Checking Gmail Trash…',{sticky:true});const inTrash=await listIds('TRASH'),ids=last.ids.filter(id=>inTrash.has(id));
+    if(!ids.length){await setMeta('trashLog',log.slice(0,-1));toast('None of those messages are still in Trash.');return;}
+    const ok=confirm(`Restore ${msgs(ids.length)} from the last trash run?`);if(!ok){toast('Cancelled. Nothing was changed.');return;}
     const restored=[],unmark=cacheMarker('TRASH',false);let failure=null;
     try {await bulkTrash(ids,true,async part=>{restored.push(...part);await unmark(part);});}
     catch(e){failure=e;}
@@ -950,10 +975,10 @@ async function undoTrash() {
     recomputeMatches(false);await updateTrashInfo();
     if(failure){
       if(failure.message==='expired'){expireForAction();return;}
-      say(`Restore stopped after ${msgs(restored.length)} of ${ids.length.toLocaleString()}: ${failure.message}. Undo again to carry on.`,true);return;
+      toast(`Restore stopped after ${msgs(restored.length)} of ${ids.length.toLocaleString()}: ${failure.message}. Undo again to carry on.`,{alert:true});return;
     }
-    say(`Restored ${msgs(restored.length)} from Trash.`);
-  } catch(e){if(e.message==='expired')expireForAction();else say('Restore stopped: '+e.message,true);}
+    toast(`Restored ${msgs(restored.length)} from Trash.`);
+  } catch(e){if(e.message==='expired')expireForAction();else toast('Restore stopped: '+e.message,{alert:true});}
 }
 /* ---------- Strip attachments, stage 1: read-only preview ---------- */
 // Nothing in this section writes to Gmail. It reads one message (format=raw), works out which
@@ -1117,7 +1142,7 @@ async function listQuery(q) {
   do {
     const r = await api(`/messages?q=${encodeURIComponent(q)}&maxResults=500` + (page ? '&pageToken=' + page : ''));
     (r.messages || []).forEach(m => ids.push(m.id)); page = r.nextPageToken;
-    say(`Finding messages with attachments… ${ids.length.toLocaleString()}`);
+    toast(`Finding messages with attachments… ${ids.length.toLocaleString()}`,{sticky:true});
   } while (page);
   return ids;
 }
@@ -1127,14 +1152,14 @@ async function ensureAttachIds() {
     const cached = await getMeta('attachIds'), hist = await getMeta('history');
     const stale = !cached || (hist && hist.at && cached.at < hist.at);
     if (cached && (!stale || !token)) { attachSet = new Set(cached.ids); return true; }
-    if (!token) { say('Connect Gmail to load the list of messages with attachments.', true); return false; }
+    if (!token) { toast('Connect Gmail to load the list of messages with attachments.',{alert:true}); return false; }
     const ids = await listQuery('has:attachment');
     await setMeta('attachIds', { ids, at: Date.now() });
     attachSet = new Set(ids);
-    say(`${msgs(ids.length)} with attachments found.`);
+    toast(`${msgs(ids.length)} with attachments found.`);
     return true;
   } catch (e) {
-    if (e.message === 'expired') expireForAction(); else say('Could not load the attachment list: ' + e.message, true);
+    if (e.message === 'expired') expireForAction(); else toast('Could not load the attachment list: ' + e.message,{alert:true});
     return false;
   }
 }
@@ -1166,10 +1191,10 @@ function renderStripPreview(m, r, a) {
 }
 async function previewStrip() {
   $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
-  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  if (!token) { toast('Tap Connect Gmail first.',{alert:true}); return; }
   const rows = selectedRows();
-  if (rows.length !== 1) { say('Select exactly one message to preview.', true); return; }
-  say('Reading the message from Gmail…'); // clears any earlier alert (e.g. the line above)
+  if (rows.length !== 1) { toast('Select exactly one message to preview.',{alert:true}); return; }
+  toast('Reading the message from Gmail…'); // clears any earlier alert (e.g. the line above)
   const m = rows[0], box = $('stripPreview');
   lastPreview = null;
   box.replaceChildren(); box.hidden = false;
@@ -1312,7 +1337,7 @@ function downloadStripZip() {
   }));
   const zip = buildZip(entries);
   triggerDownload(zipFileName(m, analysis.subject), zip);
-  say(`Downloaded ${msgs(entries.length)} as a zip. Nothing was changed in Gmail.`);
+  toast(`Downloaded ${msgs(entries.length)} as a zip. Nothing was changed in Gmail.`);
 }
 /* ---------- Strip attachments, stage 3: insert a stripped copy (verify only, no trash) ---------- */
 // Inserts a real copy into Gmail so it can be checked by hand; the original is never touched
@@ -1360,19 +1385,19 @@ async function insertStrippedCopy() {
   if (!lastPreview || !lastPreview.analysis.remove.length) return;
   const { rawBin, analysis, labelIds, threadId } = lastPreview;
   const newRaw = buildStrippedRaw(rawBin, analysis);
-  if (!newRaw) { say('Could not safely rebuild this message (an attachment is nested too deep); skipped.', true); return; }
+  if (!newRaw) { toast('Could not safely rebuild this message (an attachment is nested too deep); skipped.',{alert:true}); return; }
   const ok = confirm('Insert a stripped copy of this message into Gmail so you can check it? The original will not be changed or trashed.');
-  if (!ok) { say('Cancelled. Nothing was changed.'); return; }
-  say('Inserting the stripped copy…');
+  if (!ok) { toast('Cancelled. Nothing was changed.'); return; }
+  toast('Inserting the stripped copy…',{sticky:true});
   try {
     const body = { raw: binaryToB64url(newRaw), labelIds: labelIds || [], threadId };
     const inserted = await api('/messages?internalDateSource=dateHeader', { method: 'POST', body: JSON.stringify(body) });
     const check = await api(`/messages/${inserted.id}?format=metadata&fields=id,threadId,labelIds,sizeEstimate`);
     renderInsertResult(check, threadId);
-    say('Inserted. Check it in Gmail before doing anything else — the original was not touched.');
+    toast('Inserted. Check it in Gmail before doing anything else — the original was not touched.');
   } catch (e) {
     if (e.message === 'expired') { expireForAction(); return; }
-    say('Insert failed: ' + e.message + '. The original was not touched.', true);
+    toast('Insert failed: ' + e.message + '. The original was not touched.',{alert:true});
   }
 }
 /* ---------- Strip attachments, stage 4: full pipeline ---------- */
@@ -1428,24 +1453,24 @@ async function stripOne(m) {
 async function stripSelected() {
   $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
   if (stripBusy) return;
-  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  if (!token) { toast('Tap Connect Gmail first.',{alert:true}); return; }
   const chosen = selectedRows();
-  if (!chosen.length) { say('No messages are selected.'); return; }
+  if (!chosen.length) { toast('No messages are selected.'); return; }
   const totalBytes = chosen.reduce((n, m) => n + m.size, 0);
   const ok = confirm(`Strip attachments from ${msgs(chosen.length)} (up to ${fmt(totalBytes)})?\n\nEach message with a large attachment gets its attachments zipped and downloaded to this device, a copy without the attachments inserted into Gmail, and the original moved to Trash. Messages without a large attachment are skipped and left alone. Starred and already-trashed messages are excluded.\n\nYou can undo a run afterward from this menu.`);
-  if (!ok) { say('Cancelled. Nothing was changed.'); return; }
+  if (!ok) { toast('Cancelled. Nothing was changed.'); return; }
 
   stripBusy = true;
   try {
-    say('Checking starred and trashed messages in Gmail…');
+    toast('Checking starred and trashed messages in Gmail…',{sticky:true});
     let starred, trashed;
     try { [starred, trashed] = await Promise.all([listIds('STARRED'), listIds('TRASH')]); }
-    catch (e) { if (e.message === 'expired') { expireForAction(); return; } say('Could not start: ' + e.message, true); return; }
+    catch (e) { if (e.message === 'expired') { expireForAction(); return; } toast('Could not start: ' + e.message,{alert:true}); return; }
     const excluded = chosen.filter(m => starred.has(m.id) || trashed.has(m.id));
     excluded.forEach(m => { if (starred.has(m.id) && !m.labels.includes('STARRED')) m.labels.push('STARRED'); if (trashed.has(m.id) && !m.labels.includes('TRASH')) m.labels.push('TRASH'); });
     if (excluded.length) { await putMany(excluded); recomputeMatches(false); }
     const targets = chosen.filter(m => !starred.has(m.id) && !trashed.has(m.id));
-    if (!targets.length) { say('No selected messages remain eligible. Starred and already-trashed messages were skipped.'); return; }
+    if (!targets.length) { toast('No selected messages remain eligible. Starred and already-trashed messages were skipped.'); return; }
 
     keepAwake(true);
     const box = $('stripProgress'); box.hidden = false; box.replaceChildren();
@@ -1488,24 +1513,24 @@ async function stripSelected() {
     if (expired) { expireForAction(); return; }
     const tail = [!go ? 'stopped early' : null, excluded.length ? `${msgs(excluded.length)} newly starred/trashed skipped` : null].filter(Boolean).join(', ');
     summaryEl.textContent = `Done: ${msgs(strippedN)} stripped (${fmt(strippedBytes)} freed), ${skippedN} skipped, ${failedN} failed${tail ? ', ' + tail : ''}.`;
-    say(`Stripped ${msgs(strippedN)} (${fmt(strippedBytes)} freed). ${skippedN} skipped, ${failedN} failed.`);
+    toast(`Stripped ${msgs(strippedN)} (${fmt(strippedBytes)} freed). ${skippedN} skipped, ${failedN} failed.`);
   } finally {
     stripBusy = false;
   }
 }
 async function undoStrip() {
   $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
-  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  if (!token) { toast('Tap Connect Gmail first.',{alert:true}); return; }
   try {
     const log = (await getMeta('stripRunLog')) || [];
     const last = log[log.length - 1];
-    if (!last) { say('Nothing to undo.'); return; }
-    say('Checking Gmail Trash…');
+    if (!last) { toast('Nothing to undo.'); return; }
+    toast('Checking Gmail Trash…',{sticky:true});
     const inTrash = await listIds('TRASH');
     const pairs = last.pairs.filter(p => inTrash.has(p.originalId));
-    if (!pairs.length) { await setMeta('stripRunLog', log.slice(0, -1)); say('None of those originals are still in Trash.'); return; }
+    if (!pairs.length) { await setMeta('stripRunLog', log.slice(0, -1)); toast('None of those originals are still in Trash.'); return; }
     const ok = confirm(`Undo the last strip run? This restores ${msgs(pairs.length)} original message(s) and moves their stripped copies to Trash instead.`);
-    if (!ok) { say('Cancelled. Nothing was changed.'); return; }
+    if (!ok) { toast('Cancelled. Nothing was changed.'); return; }
     const restored = [], unmarkOrig = cacheMarker('TRASH', false), markCopy = cacheMarker('TRASH', true);
     let failure = null;
     try {
@@ -1523,10 +1548,10 @@ async function undoStrip() {
     recomputeMatches(false); await updateTrashInfo();
     if (failure) {
       if (failure.message === 'expired') { expireForAction(); return; }
-      say(`Undo stopped after ${msgs(restored.length)} of ${pairs.length}: ${failure.message}. Undo again to carry on.`, true); return;
+      toast(`Undo stopped after ${msgs(restored.length)} of ${pairs.length}: ${failure.message}. Undo again to carry on.`,{alert:true}); return;
     }
-    say(`Restored ${msgs(restored.length)} original message(s); their stripped copies were moved to Trash.`);
-  } catch (e) { if (e.message === 'expired') expireForAction(); else say('Undo stopped: ' + e.message, true); }
+    toast(`Restored ${msgs(restored.length)} original message(s); their stripped copies were moved to Trash.`);
+  } catch (e) { if (e.message === 'expired') expireForAction(); else toast('Undo stopped: ' + e.message,{alert:true}); }
 }
 async function updateDataAction() {
   const meta=(await getMeta('scan'))||{},history=await getMeta('history');
@@ -1573,6 +1598,7 @@ document.addEventListener('click',e=>{if(!$('moreMenu').contains(e.target)&&e.ta
 $('trashSelected').onclick = trashSelected;
 $('undoTrash').onclick = undoTrash;
 $('applyLabel').onclick = applyLabel;
+$('toastClose').onclick = hideToast;
 $('previewStrip').onclick = previewStrip;
 $('stripSelectedBtn').onclick = stripSelected;
 $('undoStripBtn').onclick = undoStrip;
