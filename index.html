@@ -79,8 +79,8 @@
   #reviewFilters .chev::before { content:""; width:9px; height:9px; border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); transform:translateY(-3px) rotate(45deg); }
   #reviewFilters:not([open]) .chev { transform:rotate(180deg); }
   #reviewFilters summary::-webkit-details-marker { display:none; }
-  #typeChips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-  #filterFields #typeChips .type-chip { position:relative; display:block; margin:0; color:var(--ink); font-size:.9rem; }
+  #typeChips, #attachChips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  #filterFields .type-chip { position:relative; display:block; margin:0; color:var(--ink); font-size:.9rem; }
   .type-chip input { position:absolute; inset:0; width:100%; height:100%; min-height:0; margin:0; opacity:0; cursor:pointer; }
   .type-chip span { display:flex; align-items:center; min-height:44px; padding:8px 16px; border:1px solid var(--line); border-radius:22px; background:#fff; color:var(--ink); user-select:none; transition:background .15s,color .15s,border-color .15s; }
   .type-chip input:checked + span { background:var(--ink); border-color:var(--ink); color:#fff; }
@@ -93,6 +93,11 @@
   #tabs button { border:0; min-height:50px; padding:7px 4px; font-size:.9rem; }
   #tabs button[aria-current="page"] { background:var(--ink); color:#fff; }
   .empty { padding:20px 4px; color:var(--muted); }
+  #stripPreview[hidden] { display:none; }
+  #stripPreview h2 { margin-bottom:6px; }
+  #stripPreview p { margin:6px 0; overflow-wrap:anywhere; }
+  #stripPreview ul { margin:4px 0 8px; padding-left:20px; overflow-wrap:anywhere; }
+  #stripPreview button { width:100%; }
   #results li.sectionHeader { cursor:default; display:block; padding:18px 2px 6px; border-bottom:2px solid var(--ink); font-weight:700; }
   #results li.disabled { cursor:default; opacity:.65; }
   @media (max-width:390px) { .segmented button { font-size:.8rem; } #pagination { grid-template-columns:1fr auto 1fr; gap:4px; } #pagination button { font-size:.85rem; } }
@@ -147,10 +152,16 @@
               <label class="type-chip"><input type="checkbox" data-type="archived"><span>Archived</span></label>
             </div>
           </div>
+          <div class="field"><label>Attachments</label>
+            <div id="attachChips" role="group" aria-label="Attachment filter">
+              <label class="type-chip"><input type="checkbox" id="fAttach"><span>Has attachments</span></label>
+            </div>
+          </div>
           <div class="row"><button id="clearFilters">Clear filters</button></div>
         </div>
       </details>
     </div>
+    <div class="panel" id="stripPreview" hidden aria-live="polite"></div>
     <div class="panel" id="reviewListPanel">
       <div class="checkrow"><input id="selectAll" type="checkbox" aria-label="Select all matching messages"><label for="selectAll"><strong>Select all matches</strong></label></div>
       <p id="selectionSummary">0 selected</p>
@@ -169,6 +180,7 @@
       </div>
       <div id="moreMenu" hidden>
         <button id="undoTrash">Undo last trash</button>
+        <button id="previewStrip">Preview strip attachments…</button>
         <details id="optional">
           <summary>Add Gmail label…</summary>
           <label>Label name <input id="fLabel" type="text" value="Sweeper review"></label>
@@ -614,6 +626,7 @@ const REVIEW_TYPES = Object.keys(TYPE_TESTS);
 let reviewRows = [], matchRows = [], selected = new Set(), reviewPage = 1;
 let activeTab = 'data', exploreMode = 'space', subjectCache = new Map(), renderGeneration = 0;
 let reviewVisited = false, reviewEntryFromExplore = false;
+let attachSet = null; // ids Gmail says have attachments (null until loaded)
 const PAGE_SIZE = 25;
 
 function switchTab(name) {
@@ -718,12 +731,13 @@ function applyExploreFilter(filter) {
   $('fAgeFrom').value=filter.ageFrom==null?'':filter.ageFrom;
   $('fAgeTo').value=filter.ageTo==null?'':filter.ageTo;
   document.querySelectorAll('#typeChips input').forEach(cb=>cb.checked=(filter.type||[]).includes(cb.dataset.type));
+  $('fAttach').checked=false;
   reviewPage=1; recomputeMatches(); $('reviewFilters').open=false; reviewEntryFromExplore=true;
 }
 
 function filterValues() {
   const number=id=>$(id).value.trim()===''?null:Number($(id).value);
-  return {sender:$('fSender').value.trim().toLowerCase(),sizeFrom:number('fSizeFrom'),sizeTo:number('fSizeTo'),ageFrom:number('fAgeFrom'),ageTo:number('fAgeTo'),type:[...document.querySelectorAll('#typeChips input:checked')].map(cb=>cb.dataset.type)};
+  return {sender:$('fSender').value.trim().toLowerCase(),sizeFrom:number('fSizeFrom'),sizeTo:number('fSizeTo'),ageFrom:number('fAgeFrom'),ageTo:number('fAgeTo'),type:[...document.querySelectorAll('#typeChips input:checked')].map(cb=>cb.dataset.type),attach:$('fAttach').checked};
 }
 function matching() {
   const f=filterValues(), now=Date.now();
@@ -737,6 +751,7 @@ function matching() {
     if(f.ageFrom!=null&&age<f.ageFrom) return false;
     if(f.ageTo!=null&&age>=f.ageTo) return false;
     if(!typeTest(m.labels)) return false;
+    if(f.attach&&!(attachSet&&attachSet.has(m.id))) return false;
     return true;
   }).sort((a,b)=>b.size-a.size||b.date-a.date);
 }
@@ -923,6 +938,226 @@ async function undoTrash() {
     say(`Restored ${msgs(restored.length)} from Trash.`);
   } catch(e){if(e.message==='expired')expireForAction();else say('Restore stopped: '+e.message,true);}
 }
+/* ---------- Strip attachments, stage 1: read-only preview ---------- */
+// Nothing in this section writes to Gmail. It reads one message (format=raw), works out which
+// attachments a strip would remove, and shows the result.
+const STRIP_MIN_BYTES = 50 * 1024; // attachments smaller than this are left in place
+const STRIP_NOTE_BYTES = 400;      // rough size of the note part a stripped copy would carry
+const STRIP_UNSAFE = ['multipart/signed', 'multipart/encrypted', 'application/pkcs7-mime', 'application/x-pkcs7-mime', 'application/pgp-encrypted'];
+
+// MIME analysis works on a binary string (one char per byte) so offsets match the original bytes.
+function b64urlToBinary(s) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return atob(s);
+}
+function decodeBytes(bin, charset) {
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  try { return new TextDecoder(charset || 'utf-8').decode(u); } catch (e) { return new TextDecoder('utf-8').decode(u); }
+}
+function decodeText(v) { // header text: raw 8-bit UTF-8 and RFC 2047 encoded-words
+  if (/[-ÿ]/.test(v)) v = decodeBytes(v, 'utf-8');
+  v = v.replace(/(\?=)\s+(=\?)/g, '$1$2');
+  return v.replace(/=\?([^?\s]+)\?([bBqQ])\?([^?]*)\?=/g, (m, cs, enc, text) => {
+    cs = cs.replace(/\*.*$/, '');
+    let bin;
+    if (/b/i.test(enc)) { try { bin = atob(text); } catch (e) { return m; } }
+    else bin = text.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (x, h) => String.fromCharCode(parseInt(h, 16)));
+    return decodeBytes(bin, cs);
+  });
+}
+function splitSemis(v) { // split on ; outside quotes, removing the quotes
+  const out = []; let cur = '', q = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (q) { if (c === '\\' && i + 1 < v.length) { cur += v[++i]; continue; } if (c === '"') q = false; else cur += c; continue; }
+    if (c === '"') { q = true; continue; }
+    if (c === ';') { out.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+// Returns {main, params, ext}: params has RFC 2231 values (name*=, name*0*= ...) already decoded; ext marks those.
+function parseHeaderValue(v) {
+  const parts = splitSemis(v || '');
+  const out = { main: (parts[0] || '').trim().toLowerCase(), params: {}, ext: {} };
+  const pieces = {};
+  parts.slice(1).forEach(part => {
+    const i = part.indexOf('='); if (i < 0) return;
+    const key = part.slice(0, i).trim().toLowerCase(), val = part.slice(i + 1).replace(/^\s+/, ''); // keep trailing spaces: they can be inside quotes
+    const m = key.match(/^([^*]+)(?:\*(\d+))?(\*)?$/);
+    if (!m || (m[2] == null && !m[3])) { out.params[key] = val; return; }
+    (pieces[m[1]] = pieces[m[1]] || []).push({ idx: m[2] == null ? 0 : +m[2], isExt: !!m[3], val });
+  });
+  Object.keys(pieces).forEach(base => {
+    const list = pieces[base].sort((a, b) => a.idx - b.idx);
+    let charset = '', bin = '';
+    list.forEach((pc, n) => {
+      let val = pc.val;
+      if (pc.isExt) {
+        if (n === 0) { const mm = val.match(/^([^']*)'[^']*'(.*)$/); if (mm) { charset = mm[1]; val = mm[2]; } }
+        val = val.replace(/%([0-9A-Fa-f]{2})/g, (x, h) => String.fromCharCode(parseInt(h, 16)));
+      }
+      bin += val;
+    });
+    out.params[base] = decodeBytes(bin, charset || 'utf-8'); out.ext[base] = true;
+  });
+  return out;
+}
+function paramText(hv, key) { const v = hv.params[key]; return v == null ? '' : (hv.ext[key] ? v : decodeText(v)); }
+function parseMimeHeaders(s, start, end) {
+  let hdrEnd = end, bodyStart = end;
+  if (s.startsWith('\r\n', start)) { hdrEnd = start; bodyStart = start + 2; }
+  else if (s[start] === '\n') { hdrEnd = start; bodyStart = start + 1; }
+  else {
+    const m = /\r?\n\r?\n/.exec(s.slice(start, Math.min(end, start + 262144)));
+    if (m) { hdrEnd = start + m.index; bodyStart = hdrEnd + m[0].length; }
+  }
+  const list = [];
+  s.slice(start, hdrEnd).replace(/\r?\n[ \t]+/g, ' ').split(/\r?\n/).forEach(line => {
+    const i = line.indexOf(':'); if (i > 0) list.push({ name: line.slice(0, i).trim().toLowerCase(), value: line.slice(i + 1).trim() });
+  });
+  return { list, bodyStart };
+}
+function splitMultipart(s, start, end, boundary) { // returns [startOffset, endOffset] for each child part
+  const delim = '--' + boundary, parts = [];
+  let pos = start, cur = -1;
+  while (pos < end) {
+    const i = s.indexOf(delim, pos);
+    if (i < 0 || i >= end) break;
+    const after = s[i + delim.length];
+    const atLineStart = i === start || s[i - 1] === '\n';
+    const closing = s.startsWith('--', i + delim.length);
+    const validEnd = closing || after === undefined || after === '\r' || after === '\n' || after === ' ' || after === '\t';
+    if (!atLineStart || !validEnd) { pos = i + delim.length; continue; }
+    if (cur >= 0) { let e = i; if (s[e - 1] === '\n') e--; if (s[e - 1] === '\r') e--; parts.push([cur, e]); }
+    if (closing) { cur = -1; break; }
+    const nl = s.indexOf('\n', i);
+    cur = nl < 0 || nl >= end ? end : nl + 1; pos = cur;
+  }
+  if (cur >= 0 && cur <= end) parts.push([cur, end]); // missing closing boundary
+  return parts;
+}
+function parsePart(s, start, end, depth = 0) {
+  const h = parseMimeHeaders(s, start, end);
+  const get = n => { const x = h.list.find(y => y.name === n); return x ? x.value : ''; };
+  const ct = parseHeaderValue(get('content-type') || 'text/plain'), cd = parseHeaderValue(get('content-disposition'));
+  const part = {
+    start, end, bodyStart: h.bodyStart, hdr: h.list, type: ct.main || 'text/plain', disp: cd.main,
+    filename: paramText(cd, 'filename') || paramText(ct, 'name'),
+    cid: get('content-id').trim(), enc: get('content-transfer-encoding').trim().toLowerCase(), children: []
+  };
+  if (part.type.startsWith('multipart/') && ct.params.boundary && depth < 20) {
+    splitMultipart(s, h.bodyStart, end, ct.params.boundary).forEach(([a, b]) => part.children.push(parsePart(s, a, b, depth + 1)));
+  }
+  return part;
+}
+function decodedSize(s, p) {
+  const a = p.bodyStart, b = p.end;
+  if (p.enc === 'base64') {
+    let n = 0, pad = 0;
+    for (let i = a; i < b; i++) { const c = s.charCodeAt(i); if (c === 61) pad++; else if (c > 32) n++; }
+    return Math.max(0, Math.floor((n + pad) * 3 / 4) - pad);
+  }
+  if (p.enc === 'quoted-printable') { const t = s.slice(a, b); return t.length - 2 * (t.match(/=[0-9A-Fa-f]{2}/g) || []).length; }
+  return Math.max(0, b - a);
+}
+// Works out what a strip would do. Inline images (Content-ID) and files under STRIP_MIN_BYTES stay in place;
+// signed, encrypted and attached-email messages are reported as unsupported instead of guessed at.
+function analyzeMime(s) {
+  const root = parsePart(s, 0, s.length);
+  const hv = n => { const x = root.hdr.find(y => y.name === n); return x ? decodeText(x.value) : ''; };
+  const res = { rawSize: s.length, subject: hv('subject'), remove: [], small: [], inline: [], unsupported: [], newSize: 0 };
+  const walk = p => {
+    if (STRIP_UNSAFE.includes(p.type)) { res.unsupported.push(p.type === 'multipart/signed' ? 'Digitally signed message' : 'Encrypted message'); return; }
+    if (p.type === 'message/rfc822' || p.type === 'message/global') { res.unsupported.push('Contains an attached email' + (p.filename ? ' (' + p.filename + ')' : '')); return; }
+    if (p.type.startsWith('multipart/')) {
+      if (!p.children.length) res.unsupported.push('Unreadable message structure');
+      p.children.forEach(walk); return;
+    }
+    const named = !!p.filename, attached = p.disp === 'attachment' || named;
+    if (p.type.startsWith('text/') && !attached) return; // message body, calendar data, etc.
+    const bytes = decodedSize(s, p);
+    if (p.cid && p.disp !== 'attachment') { res.inline.push({ name: p.filename || p.cid, type: p.type, bytes }); return; }
+    if (!attached && p.type.startsWith('text/')) return;
+    const item = { name: p.filename || '(unnamed)', type: p.type, bytes, encoded: p.end - p.start };
+    (bytes < STRIP_MIN_BYTES ? res.small : res.remove).push(item);
+  };
+  walk(root);
+  if (!root.type.startsWith('multipart/') && res.remove.length) { // the whole message is one attachment
+    res.unsupported.push('Message is a single attachment with no body'); res.remove = [];
+  }
+  const freed = res.remove.reduce((n, a) => n + a.encoded, 0);
+  res.newSize = res.remove.length ? Math.max(0, s.length - freed + STRIP_NOTE_BYTES) : s.length;
+  return res;
+}
+
+async function listQuery(q) {
+  const ids = []; let page;
+  do {
+    const r = await api(`/messages?q=${encodeURIComponent(q)}&maxResults=500` + (page ? '&pageToken=' + page : ''));
+    (r.messages || []).forEach(m => ids.push(m.id)); page = r.nextPageToken;
+    say(`Finding messages with attachments… ${ids.length.toLocaleString()}`);
+  } while (page);
+  return ids;
+}
+// Ids with attachments are cached; they are re-fetched only when a Sync has happened since.
+async function ensureAttachIds() {
+  try {
+    const cached = await getMeta('attachIds'), hist = await getMeta('history');
+    const stale = !cached || (hist && hist.at && cached.at < hist.at);
+    if (cached && (!stale || !token)) { attachSet = new Set(cached.ids); return true; }
+    if (!token) { say('Connect Gmail to load the list of messages with attachments.', true); return false; }
+    const ids = await listQuery('has:attachment');
+    await setMeta('attachIds', { ids, at: Date.now() });
+    attachSet = new Set(ids);
+    say(`${msgs(ids.length)} with attachments found.`);
+    return true;
+  } catch (e) {
+    if (e.message === 'expired') expireForAction(); else say('Could not load the attachment list: ' + e.message, true);
+    return false;
+  }
+}
+
+function renderStripPreview(m, r, a) {
+  const box = $('stripPreview'); box.replaceChildren(); box.hidden = false;
+  const add = (tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if (cls) n.className = cls; box.append(n); return n; };
+  const list = items => { const ul = document.createElement('ul'); items.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.append(li); }); box.append(ul); };
+  const names = items => items.slice(0, 5).map(x => x.name).join(', ') + (items.length > 5 ? ` and ${items.length - 5} more` : '');
+  add('h2', 'Strip preview');
+  add('p', a.subject || '(no subject)', 'summary');
+  add('p', `${m.from || '(unknown sender)'} · ${when(m)}`, 'muted');
+  if (a.unsupported.length) { add('p', 'Would be skipped, not safe to strip:', 'summary'); list(a.unsupported); }
+  if (a.remove.length) {
+    const total = a.remove.reduce((n, x) => n + x.bytes, 0);
+    add('p', `Would remove ${a.remove.length} ${a.remove.length === 1 ? 'attachment' : 'attachments'} (${fmt(total)}):`, 'summary');
+    list(a.remove.map(x => `${x.name} · ${x.type} · ${fmt(x.bytes)}`));
+    add('p', `Message size: ${fmt(a.rawSize)} → about ${fmt(a.newSize)}, freeing about ${fmt(Math.max(0, a.rawSize - a.newSize))}.`);
+  } else if (!a.unsupported.length) add('p', `Nothing to strip: no attachments of ${fmt(STRIP_MIN_BYTES)} or more.`, 'summary');
+  if (a.small.length) add('p', `Left in place, under ${fmt(STRIP_MIN_BYTES)}: ${a.small.length} (${names(a.small)}).`, 'muted');
+  if (a.inline.length) add('p', `Inline images left in place: ${a.inline.length} (${fmt(a.inline.reduce((n, x) => n + x.bytes, 0))} in total).`, 'muted');
+  add('p', 'Preview only. Nothing was changed in Gmail.', 'hint');
+  const close = add('button', 'Close preview'); close.onclick = () => { box.hidden = true; };
+  box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+async function previewStrip() {
+  $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
+  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  const rows = selectedRows();
+  if (rows.length !== 1) { say('Select exactly one message to preview.', true); return; }
+  const m = rows[0], box = $('stripPreview');
+  box.replaceChildren(); box.hidden = false;
+  const note = document.createElement('p'); note.textContent = 'Reading the message from Gmail…'; box.append(note);
+  try {
+    const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds`);
+    renderStripPreview(m, r, analyzeMime(b64urlToBinary(r.raw)));
+  } catch (e) {
+    if (e.message === 'expired') { box.hidden = true; expireForAction(); return; }
+    note.textContent = 'Preview failed: ' + e.message + '. Nothing was changed.';
+  }
+}
 async function updateDataAction() {
   const meta=(await getMeta('scan'))||{},history=await getMeta('history');
   $('dataAction').textContent=meta.pageToken?'Resume scan':history&&history.id?'Sync with Gmail':'Scan Gmail';
@@ -961,12 +1196,17 @@ document.querySelectorAll('#typeChips input').forEach(cb=>cb.addEventListener('c
   if(cb===notsent&&notsent.checked)sent.checked=false;
   recomputeMatches(true);
 }));
-$('clearFilters').onclick = () => { ['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo'].forEach(id=>$(id).value='');document.querySelectorAll('#typeChips input').forEach(cb=>cb.checked=false);recomputeMatches(true); };
+$('clearFilters').onclick = () => { ['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo'].forEach(id=>$(id).value='');document.querySelectorAll('#typeChips input').forEach(cb=>cb.checked=false);$('fAttach').checked=false;recomputeMatches(true); };
 $('moreActions').onclick = () => { const menu=$('moreMenu'), open=menu.hidden; menu.hidden=!open; $('moreActions').setAttribute('aria-expanded',String(open)); };
 document.addEventListener('click',e=>{if(!$('moreMenu').contains(e.target)&&e.target!==$('moreActions')){$('moreMenu').hidden=true;$('moreActions').setAttribute('aria-expanded','false');}});
 $('trashSelected').onclick = trashSelected;
 $('undoTrash').onclick = undoTrash;
 $('applyLabel').onclick = applyLabel;
+$('previewStrip').onclick = previewStrip;
+$('fAttach').addEventListener('change', async () => {
+  if ($('fAttach').checked && !(await ensureAttachIds())) $('fAttach').checked = false;
+  recomputeMatches(true);
+});
 countMsgs().then(async n => { if(n){done=n;$('counts').textContent=`${n.toLocaleString()} messages saved from an earlier scan`;} await updateDataAction(); });
 updateDataAction();
 </script>
