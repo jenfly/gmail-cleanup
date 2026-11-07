@@ -819,20 +819,53 @@ async function ensureLabel(name) {
   const found=await findLabel(name); if(found)return found;
   const r=await api('/labels',{method:'POST',body:JSON.stringify({name,labelListVisibility:'labelShow',messageListVisibility:'show'})});return r.id;
 }
-async function batchLabel(ids,body) {
-  for(let i=0;i<ids.length;i+=1000){await api('/messages/batchModify',{method:'POST',body:JSON.stringify({ids:ids.slice(i,i+1000),...body})});say(`Working… ${Math.min(i+1000,ids.length).toLocaleString()} of ${ids.length.toLocaleString()}`);}
+async function batchLabel(ids,body,onBatch) {
+  for(let i=0;i<ids.length;i+=1000){
+    const part=ids.slice(i,i+1000);
+    await api('/messages/batchModify',{method:'POST',body:JSON.stringify({ids:part,...body})});
+    if(onBatch) await onBatch(part); // Gmail accepted this batch: record it now, in case a later one fails
+    say(`Working… ${Math.min(i+1000,ids.length).toLocaleString()} of ${ids.length.toLocaleString()}`);
+  }
+}
+// Returns a function that adds/removes a label on the cached copies of the given message ids and saves them.
+function cacheMarker(label,add) {
+  const by=new Map(reviewRows.map(m=>[m.id,m]));
+  return async ids=>{
+    const changed=[];
+    ids.forEach(id=>{
+      const m=by.get(id); if(!m) return;
+      const has=m.labels.includes(label);
+      if(add&&!has){m.labels.push(label);changed.push(m);}
+      else if(!add&&has){m.labels=m.labels.filter(l=>l!==label);changed.push(m);}
+    });
+    if(changed.length) await putMany(changed);
+  };
 }
 const labelName=()=>$('fLabel').value.trim();
 async function applyLabel() {
   const name=labelName(), rows=selectedRows();
   if(!token){say('Tap Connect Gmail first.',true);return;} if(!name){say('Enter a label name.',true);return;} if(!rows.length){say('No messages are selected.');return;}
-  try {const id=await ensureLabel(name);await batchLabel(rows.map(m=>m.id),{addLabelIds:[id]});rows.forEach(m=>{if(!m.labels.includes(id))m.labels.push(id);});await putMany(rows);say(`Added "${name}" to ${msgs(rows.length)} selected messages.`);}
+  try {const id=await ensureLabel(name);await batchLabel(rows.map(m=>m.id),{addLabelIds:[id]},cacheMarker(id,true));say(`Added "${name}" to ${msgs(rows.length)} selected messages.`);}
   catch(e){if(e.message==='expired')expireForAction();else say('Labelling stopped: '+e.message,true);}
 }
-async function bulkTrash(ids,undo) {
-  try {await batchLabel(ids,undo?{removeLabelIds:['TRASH']}:{addLabelIds:['TRASH']});return;}
+// onDone(ids) is called as soon as Gmail has accepted a batch (or a group of single messages),
+// so callers can keep the local cache in step even if a later batch fails.
+async function bulkTrash(ids,undo,onDone=async()=>{}) {
+  const finished=new Set();
+  const mark=async part=>{part.forEach(id=>finished.add(id));await onDone(part);};
+  try {await batchLabel(ids,undo?{removeLabelIds:['TRASH']}:{addLabelIds:['TRASH']},mark);return;}
   catch(e){if(e.status!==400&&e.status!==404)throw e;}
-  let n=0;for(const id of ids){try{await api(`/messages/${id}/${undo?'untrash':'trash'}`,{method:'POST'});}catch(e){if(e.status!==404)throw e;}if(++n%50===0)say(`Working… ${n.toLocaleString()} of ${ids.length.toLocaleString()}`);}
+  // Fallback: one message at a time, skipping anything an earlier batch already did.
+  const rest=ids.filter(id=>!finished.has(id));
+  let n=0,buf=[];
+  const flush=async()=>{if(buf.length){const part=buf;buf=[];await mark(part);}};
+  try {
+    for(const id of rest){
+      try{await api(`/messages/${id}/${undo?'untrash':'trash'}`,{method:'POST'});buf.push(id);}catch(e){if(e.status!==404)throw e;}
+      if(buf.length>=50) await flush();
+      if(++n%50===0)say(`Working… ${(ids.length-rest.length+n).toLocaleString()} of ${ids.length.toLocaleString()}`);
+    }
+  } finally {await flush();}
 }
 async function trashSelected() {
   const chosen=selectedRows();
@@ -852,11 +885,20 @@ async function trashSelected() {
     if(!ids.length){recomputeMatches(false);await updateTrashInfo();say('No selected messages remain eligible. Starred and already-trashed messages were skipped.');return;}
     const ok=confirm(`Move ${msgs(ids.length)} (${fmt(bytes)}) to Gmail Trash? Starred and already-trashed messages are excluded.${skipped.length?`\n\n${msgs(skipped.length)} newly starred or trashed messages were skipped.`:''} You can undo this from the Review tab.`);
     if(!ok){say('Cancelled. Nothing was changed.');return;}
-    say('Moving selected messages to Trash…'); await bulkTrash(ids,false);
-    const log=(await getMeta('trashLog'))||[];log.push({at:Date.now(),ids,bytes});await setMeta('trashLog',log.slice(-10));
-    rows.forEach(m=>{if(!m.labels.includes('TRASH'))m.labels.push('TRASH');});await putMany(rows);
-    say(`Moved ${msgs(ids.length)} (${fmt(bytes)}) to Trash. Empty Trash in Gmail to free the space.`);
+    say('Moving selected messages to Trash…');
+    const moved=[],sizes=new Map(rows.map(m=>[m.id,m.size])),mark=cacheMarker('TRASH',true);
+    let failure=null;
+    try {await bulkTrash(ids,false,async part=>{moved.push(...part);await mark(part);});}
+    catch(e){failure=e;}
+    if(moved.length){ // log what actually moved, even after a partial failure, so Undo still works
+      const log=(await getMeta('trashLog'))||[];log.push({at:Date.now(),ids:moved,bytes:moved.reduce((n,id)=>n+(sizes.get(id)||0),0)});await setMeta('trashLog',log.slice(-10));
+    }
     recomputeMatches(false);await updateTrashInfo();
+    if(failure){
+      if(failure.message==='expired'){expireForAction();return;}
+      say(`Trash stopped after moving ${msgs(moved.length)} of ${ids.length.toLocaleString()}: ${failure.message}. Those are already in Trash and gone from this list. Sync with Gmail before retrying.`,true);return;
+    }
+    say(`Moved ${msgs(moved.length)} (${fmt(moved.reduce((n,id)=>n+(sizes.get(id)||0),0))}) to Trash. Empty Trash in Gmail to free the space.`);
   } catch(e){if(e.message==='expired')expireForAction();else say('Trash stopped: '+e.message+'. Sync with Gmail before retrying.',true);}
 }
 async function undoTrash() {
@@ -866,9 +908,19 @@ async function undoTrash() {
     say('Checking Gmail Trash…');const inTrash=await listIds('TRASH'),ids=last.ids.filter(id=>inTrash.has(id));
     if(!ids.length){await setMeta('trashLog',log.slice(0,-1));say('None of those messages are still in Trash.');return;}
     const ok=confirm(`Restore ${msgs(ids.length)} from the last trash run?`);if(!ok){say('Cancelled. Nothing was changed.');return;}
-    await bulkTrash(ids,true);await setMeta('trashLog',log.slice(0,-1));
-    const set=new Set(ids);reviewRows.filter(m=>set.has(m.id)).forEach(m=>{m.labels=m.labels.filter(l=>l!=='TRASH');});await putMany(reviewRows.filter(m=>set.has(m.id)));
-    say(`Restored ${msgs(ids.length)} from Trash.`);recomputeMatches(false);await updateTrashInfo();
+    const restored=[],unmark=cacheMarker('TRASH',false);let failure=null;
+    try {await bulkTrash(ids,true,async part=>{restored.push(...part);await unmark(part);});}
+    catch(e){failure=e;}
+    const left=new Set(restored), keep=log.slice(0,-1);
+    const remaining=last.ids.filter(id=>!left.has(id));
+    if(failure&&remaining.length) keep.push({...last,ids:remaining}); // let Undo carry on with the rest
+    await setMeta('trashLog',keep);
+    recomputeMatches(false);await updateTrashInfo();
+    if(failure){
+      if(failure.message==='expired'){expireForAction();return;}
+      say(`Restore stopped after ${msgs(restored.length)} of ${ids.length.toLocaleString()}: ${failure.message}. Undo again to carry on.`,true);return;
+    }
+    say(`Restored ${msgs(restored.length)} from Trash.`);
   } catch(e){if(e.message==='expired')expireForAction();else say('Restore stopped: '+e.message,true);}
 }
 async function updateDataAction() {
