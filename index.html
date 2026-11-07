@@ -13,13 +13,18 @@
   :root { --bg:#eef2f4; --ink:#14232b; --muted:#5b6b73; --line:#cfd8dd; --accent:#1f6f5c; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,sans-serif; }
-  main { max-width:680px; margin:0 auto; padding:calc(72px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(150px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
+  main { max-width:680px; margin:0 auto; padding:calc(60px + env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(150px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); }
   h1 { font-size:1.45rem; margin:0; }
   h2 { font-size:1.1rem; margin:0 0 10px; scroll-margin-top:100px; }
   #topbar { position:fixed; z-index:5; top:0; left:0; right:0; background:var(--bg); border-bottom:1px solid var(--line); padding: max(8px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 8px max(16px,env(safe-area-inset-left)); }
-  #topinner { max-width:680px; margin:auto; }
-  #status { display:none; color:var(--muted); margin:2px 0 0; min-height:1.35em; font-size:.9rem; }
-  body[data-tab="data"] #status, body.status-attention #status { display:block; }
+  #topinner { max-width:680px; margin:auto; display:flex; align-items:center; justify-content:space-between; gap:10px; white-space:nowrap; overflow:hidden; }
+  #topinner h1 { overflow:hidden; text-overflow:ellipsis; }
+  #connIndicator { display:flex; align-items:center; gap:5px; flex:none; font-size:.82rem; font-weight:600; color:var(--muted); }
+  #connIndicator::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--muted); flex:none; }
+  #connIndicator.ok::before { background:var(--accent); }
+  #connIndicator.alert { color:#8a2c2c; font-weight:700; }
+  #connIndicator.alert::before { background:#8a2c2c; }
+  #status { color:var(--muted); margin:10px 0 0; min-height:1.35em; font-size:.9rem; }
   #status.alert { color:var(--ink); font-weight:650; }
   #connectedLabel { display:none; color:var(--muted); font-weight:600; padding:10px 0; }
   #connect.connected { display:none; }
@@ -115,7 +120,7 @@
 </style>
 </head>
 <body>
-<header id="topbar"><div id="topinner"><h1>Mail Sweeper</h1><p id="status">Not connected.</p></div></header>
+<header id="topbar"><div id="topinner"><h1>Mail Sweeper</h1><span id="connIndicator">Not connected</span></div></header>
 <main>
   <section id="dataTab" class="tab active" aria-labelledby="dataHeading">
     <div class="panel">
@@ -124,9 +129,10 @@
       <div id="connectedLabel" aria-live="polite">Connected</div>
       <button id="dataAction" disabled>Scan Gmail</button>
       <button id="pause" disabled>Pause</button>
-      <div class="bar"><div id="fill"></div></div>
-      <p id="counts"></p>
-      <p id="lastSynced" class="hint">Not synced yet.</p>
+      <p id="status"></p>
+      <div class="bar" id="progressBar" hidden><div id="fill"></div></div>
+      <p id="counts" hidden></p>
+      <p id="lastSynced" class="hint" hidden></p>
     </div>
   </section>
   <section id="exploreTab" class="tab" aria-labelledby="exploreHeading">
@@ -232,8 +238,6 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const say = (t, alert = false) => {
   $('status').textContent = t;
   $('status').classList.toggle('alert', alert);
-  const attention = alert || running || syncing;
-  document.body.classList.toggle('status-attention', attention);
 };
 // One-off feedback for a Review-tab action (confirmation, error, or in-flight progress).
 // Never touches #status, so it can't leak onto another tab or resurface later.
@@ -249,16 +253,24 @@ function toast(t, { alert = false, sticky = false } = {}) {
 function hideToast() { clearTimeout(toastTimer); toastTimer = null; $('toast').hidden = true; }
 function updateStatusVisibility() {
   document.body.dataset.tab = activeTab;
-  document.body.classList.toggle('status-attention', !!(running || syncing || $('status').classList.contains('alert')));
   $('reviewConnectNotice').hidden = !!token;
 }
-// Messages from background retries must never overwrite a final status like "Paused" or "Session expired".
+// Short, always-visible connection state shown on every tab (long-form status text lives in the Data panel instead).
+function updateConnIndicator() {
+  const el = $('connIndicator');
+  el.classList.remove('ok', 'alert');
+  if (reconnectAlert) { el.textContent = 'Reconnect needed'; el.classList.add('alert'); }
+  else if (token) { el.textContent = 'Connected'; el.classList.add('ok'); }
+  else el.textContent = 'Not connected';
+}
+// Messages from background retries must never overwrite a final status like "Paused" or "Reconnect needed".
 const sayIfRunning = t => { if (running) say(t); };
 const msgs = n => n.toLocaleString() + (n === 1 ? ' message' : ' messages');
 const fmt = b => b >= 1024**3 ? (b/1024**3).toFixed(2)+' GB' : b >= 1024**2 ? (b/1024**2).toFixed(1)+' MB' : b >= 1024 ? Math.round(b/1024)+' KB' : Math.round(b)+' B';
 
 let token = null, running = false, total = 0, done = 0, scanStart = 0, doneAtStart = 0;
 let needsReconnect = false, scanGen = 0, skipped = 0, badStreak = 0, syncing = false, resumeFn = null;
+let reconnectAlert = false; // true after any session-expiry pause, until the user reconnects; drives the header indicator
 
 /* ---------- IndexedDB ---------- */
 const dbp = new Promise((res, rej) => {
@@ -295,21 +307,23 @@ async function missing(ids) {
 
 /* ---------- Auth ---------- */
 function expireForAction() {
-  token = null; needsReconnect = false;
+  token = null; needsReconnect = false; reconnectAlert = true;
   $('connect').textContent = 'Reconnect Gmail';
   $('connect').classList.remove('connected'); $('connectedLabel').classList.remove('visible');
   $('dataAction').disabled = true;
-  say('Your Gmail session expired. Tap Reconnect Gmail, then retry the action. Check Gmail first if a bulk action was interrupted.', true);
+  say('Your Gmail session expired. Reconnect, then retry the action. Check Gmail first if a bulk action was interrupted.', true);
+  updateConnIndicator();
   updateStatusVisibility();
 }
 function needReconnect() {
-  needsReconnect = true;
+  needsReconnect = true; reconnectAlert = true;
   token = null;
   $('dataAction').disabled = true;
   $('pause').disabled = true;
   $('connect').textContent = 'Reconnect & resume';
   $('connect').classList.remove('connected'); $('connectedLabel').classList.remove('visible');
-  say('Paused: your Gmail session expired (they last about an hour). Tap "Reconnect & resume" to carry on where you left off. Nothing was lost.', true);
+  say('Paused: your Gmail session expired. Reconnect to carry on where you left off. Nothing was lost.', true);
+  updateConnIndicator();
   updateStatusVisibility();
 }
 function connect() {
@@ -321,14 +335,14 @@ function connect() {
       if (r.error) { say('Sign-in failed: ' + r.error, true); return; }
       token = r.access_token;
       const resume = needsReconnect;
-      needsReconnect = false;
+      needsReconnect = false; reconnectAlert = false;
       $('connect').textContent = 'Connect Gmail';
       $('connect').classList.add('connected'); $('connectedLabel').classList.add('visible');
-      updateDataAction();
+      updateConnIndicator();
       updateStatusVisibility();
       if (activeTab === 'review') refreshReview(); // load subjects now that we're connected
-      if (resume) (resumeFn || scan)(); // came here because the session expired: carry on automatically
-      else say('Connected. Choose Scan Gmail to begin. Sessions last about an hour.');
+      if (resume) { updateDataAction(); (resumeFn || scan)(); } // came here because the session expired: carry on automatically
+      else updateDataAction(true); // not resuming: show a status line matching the current state
     }
   });
   client.requestAccessToken();
@@ -384,7 +398,7 @@ async function api(path, opts = {}) {
     e.path = path.split('?')[0]; // which call failed, to make errors diagnosable
     throw e;
   }
-  throw new Error('Gave up after repeated network or rate-limit errors. Check your connection, then press Start scan to resume.');
+  throw new Error('Gave up after repeated network or rate-limit errors. Check your connection, then try again.');
 }
 
 /* ---------- Keep the screen awake while scanning (phones) ---------- */
@@ -416,6 +430,8 @@ async function countBad() {
   });
 }
 function progress() {
+  $('progressBar').hidden = false;
+  $('counts').hidden = false;
   $('fill').style.width = total ? Math.min(100, done / total * 100) + '%' : '0';
   let line = `${done.toLocaleString()} of ${total.toLocaleString()} messages scanned`;
   const secs = (Date.now() - scanStart) / 1000, r = (done - doneAtStart) / secs;
@@ -1553,13 +1569,25 @@ async function undoStrip() {
     toast(`Restored ${msgs(restored.length)} original message(s); their stripped copies were moved to Trash.`);
   } catch (e) { if (e.message === 'expired') expireForAction(); else toast('Undo stopped: ' + e.message,{alert:true}); }
 }
-async function updateDataAction() {
-  const meta=(await getMeta('scan'))||{},history=await getMeta('history');
+async function updateDataAction(setStatus) {
+  const meta=(await getMeta('scan'))||{},history=await getMeta('history'),count=await countMsgs();
   $('dataAction').textContent=meta.pageToken?'Resume scan':history&&history.id?'Sync with Gmail':'Scan Gmail';
   $('dataAction').disabled=!token||running||syncing;
   $('pause').disabled=!running;
   $('connect').classList.toggle('connected',!!token); $('connectedLabel').classList.toggle('visible',!!token);
-  $('lastSynced').textContent=history&&history.at?`Last synced ${new Date(history.at).toLocaleString()}.`:'Not synced yet.';
+  updateConnIndicator();
+  const hasProgress=running||count>0;
+  $('progressBar').hidden=!hasProgress;
+  $('counts').hidden=!hasProgress;
+  if(!running&&count>0) $('counts').textContent=`${count.toLocaleString()} messages saved`;
+  $('lastSynced').hidden=!(history&&history.at);
+  if(history&&history.at) $('lastSynced').textContent=`Last synced ${new Date(history.at).toLocaleString()}.`;
+  // Idle status text matching the current state; skipped when a scan/sync result or pause message is already showing.
+  if(setStatus&&!running&&!syncing&&!needsReconnect){
+    if(!token) say(count?'Connect Gmail to sync.':'Connect your Gmail account to scan your messages. Nothing leaves this device except requests to Google.');
+    else if(history&&history.id) say("Ready to sync. You'll need to reconnect about an hour after signing in.");
+    else say("Ready to scan. The first scan of a large mailbox can take hours. Keep this screen open while it runs, because switching to another app may pause it. About an hour after you sign in, Gmail signs you out and you'll need to reconnect to carry on. Your progress is saved, so you can also pause and resume any time.");
+  }
 }
 async function runDataAction() {
   if(!token){say('Connect Gmail first.',true);return;}
@@ -1606,8 +1634,8 @@ $('fAttach').addEventListener('change', async () => {
   if ($('fAttach').checked && !(await ensureAttachIds())) $('fAttach').checked = false;
   recomputeMatches(true);
 });
-countMsgs().then(async n => { if(n){done=n;$('counts').textContent=`${n.toLocaleString()} messages saved from an earlier scan`;} await updateDataAction(); });
-updateDataAction();
+countMsgs().then(n => { done = n; });
+updateDataAction(true);
 </script>
 </body>
 </html>

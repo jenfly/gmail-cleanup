@@ -72,11 +72,11 @@ Google will show an **"unverified app"** warning because the app is in Testing m
 ## Using it
 
 1. **Connect Gmail** and approve access.
-2. **Start scan.** Progress is saved as it goes, so you can **Pause** or close the tab and resume later.
-3. **Top senders** shows the 25 senders using the most space.
-4. **Sync with Gmail** catches the app up after you delete, label or receive mail directly in Gmail. It asks Gmail what changed since the last sync, so it takes seconds instead of a full rescan. If it's been too long (Gmail keeps change history for roughly a week), it falls back to a quicker full check that only downloads details for new messages. Run it before you review or label anything.
+2. **Scan Gmail.** Progress is saved as it goes, so you can **Pause** or close the tab and resume later with **Resume scan**.
+3. **Sync with Gmail** catches the app up after you delete, label or receive mail directly in Gmail. It asks Gmail what changed since the last sync, so it takes seconds instead of a full rescan. If it's been too long (Gmail keeps change history for roughly a week), it falls back to a quicker full check that only downloads details for new messages. Run it before you review or label anything.
+4. **Explore** shows where your storage is going: space by type and age, **Top senders** (the 25 senders using the most space), and biggest messages.
 
-The access token lasts about an hour. If the scan stops with "Session expired," click **Connect Gmail** again, then **Start scan** to resume where it left off.
+The access token lasts about an hour. If a scan or sync pauses and the header shows "Reconnect needed," tap **Reconnect & resume** to carry on where you left off.
 
 ## Troubleshooting
 
