@@ -1275,13 +1275,14 @@ function renderStripPreview(m, r, a) {
   const close = add('button', 'Close preview'); close.id = 'stripPreviewClose'; close.onclick = () => { box.hidden = true; lastPreview = null; };
   box.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
-async function previewStrip() {
-  $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
+// Reads one message and shows the strip preview for it, regardless of what's selected in
+// Review. Used both by the ⋯ menu (via previewStrip, for the current selection) and directly
+// by an "Open preview" button on a skipped row in a batch run's results, so checking several
+// skipped messages from that list doesn't require reselecting each one in Review first.
+async function previewStripFor(m) {
   if (!token) { toast('Tap Connect Gmail first.',{alert:true}); return; }
-  const rows = selectedRows();
-  if (rows.length !== 1) { toast('Select exactly one message to preview.',{alert:true}); return; }
-  toast('Reading the message from Gmail…'); // clears any earlier alert (e.g. the line above)
-  const m = rows[0], box = $('stripPreview');
+  toast('Reading the message from Gmail…'); // clears any earlier alert
+  const box = $('stripPreview');
   lastPreview = null;
   box.replaceChildren(); box.hidden = false;
   const note = document.createElement('p'); note.textContent = 'Reading the message from Gmail…'; box.append(note);
@@ -1294,6 +1295,12 @@ async function previewStrip() {
     if (e.message === 'expired') { box.hidden = true; expireForAction(); return; }
     note.textContent = 'Preview failed: ' + e.message + '. Nothing was changed.';
   }
+}
+async function previewStrip() {
+  $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
+  const rows = selectedRows();
+  if (rows.length !== 1) { toast('Select exactly one message to preview.',{alert:true}); return; }
+  await previewStripFor(rows[0]);
 }
 /* ---------- Strip attachments, stage 2: zip and download ---------- */
 // A plain, store-only ZIP (no compression) so no library is needed: PDFs and images
@@ -1648,8 +1655,8 @@ async function stripOne(m) {
 
     const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds,threadId`);
     const rawBin = b64urlToBinary(r.raw), analysis = analyzeMime(rawBin);
-    if (analysis.unsupported.length) return { status: 'skipped', detail: analysis.unsupported.join('; '), rawBin, analysis };
-    if (!analysis.remove.length) return { status: 'skipped', detail: `no attachment of ${fmt(STRIP_MIN_BYTES)} or more`, rawBin, analysis };
+    if (analysis.unsupported.length) return { status: 'skipped', detail: analysis.unsupported.join('; ') };
+    if (!analysis.remove.length) return { status: 'skipped', detail: `no attachment of ${fmt(STRIP_MIN_BYTES)} or more` };
     const newRaw = buildStrippedRaw(rawBin, analysis);
     if (!newRaw) {
       // The batch pipeline never uses the wrap path (opts.allowWrap is never passed here) —
@@ -1657,7 +1664,7 @@ async function stripOne(m) {
       // in the run, so it can be reviewed individually from the single-message preview.
       const root = parsePart(rawBin, 0, rawBin.length);
       const needsWrap = (root.type === 'multipart/alternative' || root.type === 'multipart/related') && !!buildStrippedRaw(rawBin, analysis, { allowWrap: true });
-      return { status: 'skipped', detail: needsWrap ? 'needs an extra wrapping step — review it individually (Preview → Build wrapped copy to check…)' : 'could not safely rebuild this message’s structure', rawBin, analysis };
+      return { status: 'skipped', detail: needsWrap ? 'needs an extra wrapping step — review it individually (Preview → Build wrapped copy to check…)' : 'could not safely rebuild this message’s structure' };
     }
 
     // Download before anything in Gmail changes, so nothing is lost if a later step fails.
@@ -1726,11 +1733,11 @@ async function stripSelected() {
       const li = document.createElement('li');
       li.className = result.status;
       li.textContent = `${when(m)} · ${m.from || '(unknown sender)'} — ${result.status}: ${result.detail}`;
-      if (result.status === 'skipped' && result.rawBin && result.analysis) {
-        const copyBtn = document.createElement('button');
-        copyBtn.textContent = 'Copy structure';
-        copyBtn.onclick = () => copyStructure(result.rawBin, result.analysis);
-        li.append(copyBtn);
+      if (result.status === 'skipped') {
+        const openBtn = document.createElement('button');
+        openBtn.textContent = 'Open preview';
+        openBtn.onclick = () => previewStripFor(m);
+        li.append(openBtn);
       }
       list.append(li);
       if (result.status === 'stripped') { strippedN++; strippedBytes += result.freedBytes || 0; pairs.push({ originalId: m.id, copyId: result.copyId, bytes: result.freedBytes || 0 }); }
