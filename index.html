@@ -775,7 +775,7 @@ function selectedRows(){return matchRows.filter(m=>selected.has(m.id));}
 function updateSelectionSummary(){
   const chosen=selectedRows(), bytes=chosen.reduce((n,m)=>n+m.size,0);
   $('selectionSummary').textContent=`${msgs(chosen.length)} selected · ${fmt(bytes)}`;
-  $('trashSelected').textContent=`Trash ${chosen.length.toLocaleString()}, ${fmt(bytes)}`;
+  $('trashSelected').textContent=`Trash ${chosen.length.toLocaleString()} · ${fmt(bytes)}`;
   $('trashSelected').disabled=!chosen.length||!token;
   const all=matchRows.length>0&&chosen.length===matchRows.length;
   $('selectAll').checked=all; $('selectAll').indeterminate=chosen.length>0&&!all;
