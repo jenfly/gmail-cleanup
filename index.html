@@ -93,11 +93,16 @@
   #tabs button { border:0; min-height:50px; padding:7px 4px; font-size:.9rem; }
   #tabs button[aria-current="page"] { background:var(--ink); color:#fff; }
   .empty { padding:20px 4px; color:var(--muted); }
-  #stripPreview[hidden] { display:none; }
-  #stripPreview h2 { margin-bottom:6px; }
-  #stripPreview p { margin:6px 0; overflow-wrap:anywhere; }
+  #stripPreview[hidden],#stripProgress[hidden] { display:none; }
+  #stripPreview h2,#stripProgress h2 { margin-bottom:6px; }
+  #stripPreview p,#stripProgress p { margin:6px 0; overflow-wrap:anywhere; }
   #stripPreview ul { margin:4px 0 8px; padding-left:20px; overflow-wrap:anywhere; }
-  #stripPreview button { width:100%; }
+  #stripPreview button,#stripProgress button { width:100%; }
+  #stripProgress ul { list-style:none; margin:4px 0 8px; padding:0; max-height:50vh; overflow-y:auto; border:1px solid var(--line); border-radius:8px; }
+  #stripProgress li { padding:8px 10px; border-bottom:1px solid var(--line); font-size:.9rem; overflow-wrap:anywhere; }
+  #stripProgress li:last-child { border-bottom:none; }
+  #stripProgress li.skipped { color:var(--muted); }
+  #stripProgress li.failed { color:#8a2c2c; }
   #results li.sectionHeader { cursor:default; display:block; padding:18px 2px 6px; border-bottom:2px solid var(--ink); font-weight:700; }
   #results li.disabled { cursor:default; opacity:.65; }
   @media (max-width:390px) { .segmented button { font-size:.8rem; } #pagination { grid-template-columns:1fr auto 1fr; gap:4px; } #pagination button { font-size:.85rem; } }
@@ -162,6 +167,7 @@
       </details>
     </div>
     <div class="panel" id="stripPreview" hidden aria-live="polite"></div>
+    <div class="panel" id="stripProgress" hidden aria-live="polite"></div>
     <div class="panel" id="reviewListPanel">
       <div class="checkrow"><input id="selectAll" type="checkbox" aria-label="Select all matching messages"><label for="selectAll"><strong>Select all matches</strong></label></div>
       <p id="selectionSummary">0 selected</p>
@@ -181,6 +187,8 @@
       <div id="moreMenu" hidden>
         <button id="undoTrash">Undo last trash</button>
         <button id="previewStrip">Preview strip attachments…</button>
+        <button id="stripSelectedBtn">Strip attachments from selected…</button>
+        <button id="undoStripBtn">Undo last strip</button>
         <details id="optional">
           <summary>Add Gmail label…</summary>
           <label>Label name <input id="fLabel" type="text" value="Sweeper review"></label>
@@ -1358,6 +1366,158 @@ async function insertStrippedCopy() {
     say('Insert failed: ' + e.message + '. The original was not touched.', true);
   }
 }
+/* ---------- Strip attachments, stage 4: full pipeline ---------- */
+// For each selected message with a large attachment: download a zip, insert a stripped
+// copy, verify it, then move the original to Trash. Messages without a large attachment,
+// or whose attachment is too nested to splice safely, are skipped and reported rather than
+// guessed at. A message already past its insert step when Stop is pressed (or the app dies)
+// is recorded in meta.stripLog; a later run on the same message skips straight to trashing
+// it instead of inserting a second copy.
+let stripBusy = false;
+
+// Does the Gmail work for one message: insert the stripped copy (or reuse one left over
+// from an interrupted earlier run), then trash the original.
+async function stripOne(m) {
+  try {
+    const stripLog = (await getMeta('stripLog')) || {};
+    const existing = stripLog[m.id];
+    if (existing && existing.state === 'inserted') {
+      await bulkTrash([m.id], false, cacheMarker('TRASH', true));
+      delete stripLog[m.id]; await setMeta('stripLog', stripLog);
+      return { status: 'stripped', detail: `resumed from an earlier run, copy ${existing.copyId}`, copyId: existing.copyId, freedBytes: existing.freedBytes || 0 };
+    }
+
+    const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds,threadId`);
+    const rawBin = b64urlToBinary(r.raw), analysis = analyzeMime(rawBin);
+    if (analysis.unsupported.length) return { status: 'skipped', detail: analysis.unsupported.join('; ') };
+    if (!analysis.remove.length) return { status: 'skipped', detail: `no attachment of ${fmt(STRIP_MIN_BYTES)} or more` };
+    const newRaw = buildStrippedRaw(rawBin, analysis);
+    if (!newRaw) return { status: 'skipped', detail: 'an attachment is nested too deep to strip safely' };
+
+    // Download before anything in Gmail changes, so nothing is lost if a later step fails.
+    const names = dedupeNames(analysis.remove.map(x => safeName(x.name)));
+    const entries = analysis.remove.map((item, i) => ({ name: names[i], data: decodeAttachmentBytes(rawBin, item), date: m.date ? new Date(m.date) : new Date() }));
+    triggerDownload(zipFileName(m, analysis.subject), buildZip(entries));
+
+    const inserted = await api('/messages?internalDateSource=dateHeader', { method: 'POST', body: JSON.stringify({ raw: binaryToB64url(newRaw), labelIds: r.labelIds || [], threadId: r.threadId }) });
+    const check = await api(`/messages/${inserted.id}?format=metadata&fields=id,threadId,labelIds,sizeEstimate`);
+    const freedBytes = Math.max(0, (r.sizeEstimate || m.size) - (check.sizeEstimate || 0));
+
+    stripLog[m.id] = { state: 'inserted', copyId: check.id, freedBytes, at: Date.now() };
+    await setMeta('stripLog', stripLog);
+    await putMany([{ id: check.id, from: m.from, date: m.date, size: check.sizeEstimate || 0, labels: check.labelIds || [] }]);
+
+    await bulkTrash([m.id], false, cacheMarker('TRASH', true));
+    delete stripLog[m.id]; await setMeta('stripLog', stripLog);
+
+    return { status: 'stripped', detail: `${fmt(freedBytes)} freed, copy ${check.id}`, copyId: check.id, freedBytes };
+  } catch (e) {
+    if (e.message === 'expired') throw e; // bubble up so the caller stops the whole run, not just this message
+    return { status: 'failed', detail: e.message };
+  }
+}
+async function stripSelected() {
+  $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
+  if (stripBusy) return;
+  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  const chosen = selectedRows();
+  if (!chosen.length) { say('No messages are selected.'); return; }
+  const totalBytes = chosen.reduce((n, m) => n + m.size, 0);
+  const ok = confirm(`Strip attachments from ${msgs(chosen.length)} (up to ${fmt(totalBytes)})?\n\nEach message with a large attachment gets its attachments zipped and downloaded to this device, a copy without the attachments inserted into Gmail, and the original moved to Trash. Messages without a large attachment are skipped and left alone. Starred and already-trashed messages are excluded.\n\nYou can undo a run afterward from this menu.`);
+  if (!ok) { say('Cancelled. Nothing was changed.'); return; }
+
+  stripBusy = true;
+  try {
+    say('Checking starred and trashed messages in Gmail…');
+    let starred, trashed;
+    try { [starred, trashed] = await Promise.all([listIds('STARRED'), listIds('TRASH')]); }
+    catch (e) { if (e.message === 'expired') { expireForAction(); return; } say('Could not start: ' + e.message, true); return; }
+    const excluded = chosen.filter(m => starred.has(m.id) || trashed.has(m.id));
+    excluded.forEach(m => { if (starred.has(m.id) && !m.labels.includes('STARRED')) m.labels.push('STARRED'); if (trashed.has(m.id) && !m.labels.includes('TRASH')) m.labels.push('TRASH'); });
+    if (excluded.length) { await putMany(excluded); recomputeMatches(false); }
+    const targets = chosen.filter(m => !starred.has(m.id) && !trashed.has(m.id));
+    if (!targets.length) { say('No selected messages remain eligible. Starred and already-trashed messages were skipped.'); return; }
+
+    keepAwake(true);
+    const box = $('stripProgress'); box.hidden = false; box.replaceChildren();
+    const add = (tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if (cls) n.className = cls; box.append(n); return n; };
+    add('h2', 'Stripping attachments');
+    const summaryEl = add('p', `0 of ${targets.length}…`, 'summary');
+    const list = document.createElement('ul'); box.append(list);
+    const stopBtn = add('button', 'Stop');
+    let go = true;
+    stopBtn.onclick = () => { go = false; stopBtn.disabled = true; stopBtn.textContent = 'Stopping…'; };
+    box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+
+    let strippedN = 0, strippedBytes = 0, skippedN = 0, failedN = 0, expired = false;
+    const pairs = [];
+    for (let i = 0; i < targets.length && go; i++) {
+      const m = targets[i];
+      summaryEl.textContent = `${i + 1} of ${targets.length}: ${m.from || '(unknown sender)'}…`;
+      let result;
+      try { result = await stripOne(m); }
+      catch (e) { expired = true; break; }
+      const li = document.createElement('li');
+      li.className = result.status;
+      li.textContent = `${when(m)} · ${m.from || '(unknown sender)'} — ${result.status}: ${result.detail}`;
+      list.append(li);
+      if (result.status === 'stripped') { strippedN++; strippedBytes += result.freedBytes || 0; pairs.push({ originalId: m.id, copyId: result.copyId, bytes: result.freedBytes || 0 }); }
+      else if (result.status === 'skipped') skippedN++;
+      else failedN++;
+    }
+    keepAwake(false);
+    stopBtn.hidden = true;
+
+    if (pairs.length) {
+      const log = (await getMeta('stripRunLog')) || [];
+      log.push({ at: Date.now(), pairs });
+      await setMeta('stripRunLog', log.slice(-10));
+    }
+    recomputeMatches(false); await updateTrashInfo();
+
+    if (expired) { expireForAction(); return; }
+    const tail = [!go ? 'stopped early' : null, excluded.length ? `${msgs(excluded.length)} newly starred/trashed skipped` : null].filter(Boolean).join(', ');
+    summaryEl.textContent = `Done: ${msgs(strippedN)} stripped (${fmt(strippedBytes)} freed), ${skippedN} skipped, ${failedN} failed${tail ? ', ' + tail : ''}.`;
+    say(`Stripped ${msgs(strippedN)} (${fmt(strippedBytes)} freed). ${skippedN} skipped, ${failedN} failed.`);
+  } finally {
+    stripBusy = false;
+  }
+}
+async function undoStrip() {
+  $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
+  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  try {
+    const log = (await getMeta('stripRunLog')) || [];
+    const last = log[log.length - 1];
+    if (!last) { say('Nothing to undo.'); return; }
+    say('Checking Gmail Trash…');
+    const inTrash = await listIds('TRASH');
+    const pairs = last.pairs.filter(p => inTrash.has(p.originalId));
+    if (!pairs.length) { await setMeta('stripRunLog', log.slice(0, -1)); say('None of those originals are still in Trash.'); return; }
+    const ok = confirm(`Undo the last strip run? This restores ${msgs(pairs.length)} original message(s) and moves their stripped copies to Trash instead.`);
+    if (!ok) { say('Cancelled. Nothing was changed.'); return; }
+    const restored = [], unmarkOrig = cacheMarker('TRASH', false), markCopy = cacheMarker('TRASH', true);
+    let failure = null;
+    try {
+      for (const p of pairs) {
+        await bulkTrash([p.originalId], true, unmarkOrig);
+        try { await bulkTrash([p.copyId], false, markCopy); } catch (e) { /* original is restored either way; the copy may need manual cleanup */ }
+        restored.push(p);
+      }
+    } catch (e) { failure = e; }
+    const left = new Set(restored.map(p => p.originalId));
+    const remaining = last.pairs.filter(p => !left.has(p.originalId));
+    const keep = log.slice(0, -1);
+    if (failure && remaining.length) keep.push({ ...last, pairs: remaining });
+    await setMeta('stripRunLog', keep);
+    recomputeMatches(false); await updateTrashInfo();
+    if (failure) {
+      if (failure.message === 'expired') { expireForAction(); return; }
+      say(`Undo stopped after ${msgs(restored.length)} of ${pairs.length}: ${failure.message}. Undo again to carry on.`, true); return;
+    }
+    say(`Restored ${msgs(restored.length)} original message(s); their stripped copies were moved to Trash.`);
+  } catch (e) { if (e.message === 'expired') expireForAction(); else say('Undo stopped: ' + e.message, true); }
+}
 async function updateDataAction() {
   const meta=(await getMeta('scan'))||{},history=await getMeta('history');
   $('dataAction').textContent=meta.pageToken?'Resume scan':history&&history.id?'Sync with Gmail':'Scan Gmail';
@@ -1403,6 +1563,8 @@ $('trashSelected').onclick = trashSelected;
 $('undoTrash').onclick = undoTrash;
 $('applyLabel').onclick = applyLabel;
 $('previewStrip').onclick = previewStrip;
+$('stripSelectedBtn').onclick = stripSelected;
+$('undoStripBtn').onclick = undoStrip;
 $('fAttach').addEventListener('change', async () => {
   if ($('fAttach').checked && !(await ensureAttachIds())) $('fAttach').checked = false;
   recomputeMatches(true);
