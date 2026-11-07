@@ -1082,7 +1082,7 @@ function analyzeMime(s) {
     const bytes = decodedSize(s, p);
     if (p.cid && p.disp !== 'attachment') { res.inline.push({ name: p.filename || p.cid, type: p.type, bytes }); return; }
     if (!attached && p.type.startsWith('text/')) return;
-    const item = { name: p.filename || '(unnamed)', type: p.type, bytes, encoded: p.end - p.start };
+    const item = { name: p.filename || '(unnamed)', type: p.type, bytes, encoded: p.end - p.start, bodyStart: p.bodyStart, end: p.end, enc: p.enc };
     (bytes < STRIP_MIN_BYTES ? res.small : res.remove).push(item);
   };
   walk(root);
@@ -1135,11 +1135,13 @@ function renderStripPreview(m, r, a) {
     add('p', `Would remove ${a.remove.length} ${a.remove.length === 1 ? 'attachment' : 'attachments'} (${fmt(total)}):`, 'summary');
     list(a.remove.map(x => `${x.name} · ${x.type} · ${fmt(x.bytes)}`));
     add('p', `Message size: ${fmt(a.rawSize)} → about ${fmt(a.newSize)}, freeing about ${fmt(Math.max(0, a.rawSize - a.newSize))}.`);
+    const dl = add('button', `Download ${a.remove.length === 1 ? 'it' : 'them'} as a zip`);
+    dl.onclick = downloadStripZip;
   } else if (!a.unsupported.length) add('p', `Nothing to strip: no attachments of ${fmt(STRIP_MIN_BYTES)} or more.`, 'summary');
   if (a.small.length) add('p', `Left in place, under ${fmt(STRIP_MIN_BYTES)}: ${a.small.length} (${names(a.small)}).`, 'muted');
   if (a.inline.length) add('p', `Inline images left in place: ${a.inline.length} (${fmt(a.inline.reduce((n, x) => n + x.bytes, 0))} in total).`, 'muted');
   add('p', 'Preview only. Nothing was changed in Gmail.', 'hint');
-  const close = add('button', 'Close preview'); close.onclick = () => { box.hidden = true; };
+  const close = add('button', 'Close preview'); close.onclick = () => { box.hidden = true; lastPreview = null; };
   box.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 async function previewStrip() {
@@ -1149,15 +1151,148 @@ async function previewStrip() {
   if (rows.length !== 1) { say('Select exactly one message to preview.', true); return; }
   say('Reading the message from Gmail…'); // clears any earlier alert (e.g. the line above)
   const m = rows[0], box = $('stripPreview');
+  lastPreview = null;
   box.replaceChildren(); box.hidden = false;
   const note = document.createElement('p'); note.textContent = 'Reading the message from Gmail…'; box.append(note);
   try {
     const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds`);
-    renderStripPreview(m, r, analyzeMime(b64urlToBinary(r.raw)));
+    const rawBin = b64urlToBinary(r.raw), analysis = analyzeMime(rawBin);
+    lastPreview = { m, rawBin, analysis };
+    renderStripPreview(m, r, analysis);
   } catch (e) {
     if (e.message === 'expired') { box.hidden = true; expireForAction(); return; }
     note.textContent = 'Preview failed: ' + e.message + '. Nothing was changed.';
   }
+}
+/* ---------- Strip attachments, stage 2: zip and download ---------- */
+// A plain, store-only ZIP (no compression) so no library is needed: PDFs and images
+// barely compress anyway. Writes local file headers, a central directory and an
+// end-of-central-directory record, each with a correct CRC-32 and UTF-8 filenames.
+// Nothing here writes to Gmail either; it only decodes bytes already fetched for the preview.
+let lastPreview = null; // {m, rawBin, analysis} for the message currently shown in #stripPreview
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function dosDateTime(d) {
+  const time = ((d.getHours() & 0x1F) << 11) | ((d.getMinutes() & 0x3F) << 5) | ((d.getSeconds() >> 1) & 0x1F);
+  const date = ((Math.max(0, d.getFullYear() - 1980) & 0x7F) << 9) | (((d.getMonth() + 1) & 0xF) << 5) | (d.getDate() & 0x1F);
+  return { time, date };
+}
+// Recovers the original attachment bytes from the raw binary string using the offsets
+// and transfer-encoding analyzeMime recorded for this part.
+function decodeAttachmentBytes(s, item) {
+  const bin = s.slice(item.bodyStart, item.end);
+  if (item.enc === 'base64') {
+    const raw = atob(bin.replace(/[^A-Za-z0-9+/=]/g, ''));
+    const u = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) u[i] = raw.charCodeAt(i);
+    return u;
+  }
+  if (item.enc === 'quoted-printable') {
+    const out = [];
+    for (let i = 0; i < bin.length; i++) {
+      const c = bin[i];
+      if (c === '=') {
+        if (bin[i + 1] === '\r' && bin[i + 2] === '\n') { i += 2; continue; }
+        if (bin[i + 1] === '\n') { i += 1; continue; }
+        const hex = bin.substr(i + 1, 2);
+        if (/^[0-9A-Fa-f]{2}$/.test(hex)) { out.push(parseInt(hex, 16)); i += 2; continue; }
+      }
+      out.push(c.charCodeAt(0) & 0xFF);
+    }
+    return new Uint8Array(out);
+  }
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i) & 0xFF;
+  return u;
+}
+// Filesystem-safe name: strips path separators and control characters, collapses
+// whitespace, trims length. dedupeNames appends " (2)", " (3)", ... to repeats.
+function safeName(name, maxLen = 120) {
+  let n = (name || 'file').replace(/[\/\\:*?"<>|\x00-\x1F]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!n) n = 'file';
+  if (n.length > maxLen) n = n.slice(0, maxLen).trim();
+  return n;
+}
+function dedupeNames(names) {
+  const seen = new Map();
+  return names.map(n => {
+    const count = (seen.get(n) || 0) + 1; seen.set(n, count);
+    if (count === 1) return n;
+    const dot = n.lastIndexOf('.');
+    return dot > 0 ? `${n.slice(0, dot)} (${count})${n.slice(dot)}` : `${n} (${count})`;
+  });
+}
+function buildZip(entries) { // entries: [{name, data: Uint8Array, date: Date}]
+  const enc = new TextEncoder();
+  const chunks = [], central = [];
+  let offset = 0;
+  entries.forEach(({ name, data, date }) => {
+    const nameBytes = enc.encode(name), crc = crc32(data), dt = dosDateTime(date || new Date());
+    const local = new Uint8Array(30 + nameBytes.length), lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true); lv.setUint16(10, dt.time, true); lv.setUint16(12, dt.date, true);
+    lv.setUint32(14, crc, true); lv.setUint32(18, data.length, true); lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true); lv.setUint16(28, 0, true);
+    local.set(nameBytes, 30);
+    chunks.push(local, data);
+    const cent = new Uint8Array(46 + nameBytes.length), cv = new DataView(cent.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true); cv.setUint16(12, dt.time, true); cv.setUint16(14, dt.date, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true); cv.setUint16(30, 0, true); cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true); cv.setUint16(36, 0, true); cv.setUint32(38, 0, true); cv.setUint32(42, offset, true);
+    cent.set(nameBytes, 46);
+    central.push(cent);
+    offset += local.length + data.length;
+  });
+  const centralStart = offset;
+  let centralSize = 0;
+  central.forEach(c => { chunks.push(c); centralSize += c.length; });
+  const end = new Uint8Array(22), ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(4, 0, true); ev.setUint16(6, 0, true);
+  ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, centralSize, true); ev.setUint32(16, centralStart, true); ev.setUint16(20, 0, true);
+  chunks.push(end);
+  let total = 0; chunks.forEach(c => total += c.length);
+  const out = new Uint8Array(total);
+  let pos = 0; chunks.forEach(c => { out.set(c, pos); pos += c.length; });
+  return out;
+}
+function zipFileName(m, subject) {
+  const date = m.date ? new Date(m.date).toISOString().slice(0, 10) : 'undated';
+  return `${date} ${safeName(subject || '(no subject)', 80)}.zip`;
+}
+function triggerDownload(filename, bytes) {
+  const blob = new Blob([bytes], { type: 'application/zip' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+function downloadStripZip() {
+  if (!lastPreview || !lastPreview.analysis.remove.length) return;
+  const { m, rawBin, analysis } = lastPreview;
+  const names = dedupeNames(analysis.remove.map(x => safeName(x.name)));
+  const entries = analysis.remove.map((item, i) => ({
+    name: names[i], data: decodeAttachmentBytes(rawBin, item), date: m.date ? new Date(m.date) : new Date()
+  }));
+  const zip = buildZip(entries);
+  triggerDownload(zipFileName(m, analysis.subject), zip);
+  say(`Downloaded ${msgs(entries.length)} as a zip. Nothing was changed in Gmail.`);
 }
 async function updateDataAction() {
   const meta=(await getMeta('scan'))||{},history=await getMeta('history');
