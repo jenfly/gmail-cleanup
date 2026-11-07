@@ -19,6 +19,7 @@ Guidance for Claude when working in this repo.
 - **Never require a full rescan.** The first scan took about four hours because Gmail throttles hard (roughly 4 messages/sec effective). Use Sync (Gmail history API) or targeted fetches instead.
 - Keep the local cache in step with Gmail as each step succeeds, not only at the end, so a failure partway leaves the cache matching what Gmail actually did.
 - Never put other people's email addresses (for example from her screenshots) into code, tests or docs.
+- **A new or less-tested code path inside an existing bulk action must stay reachable only from a single-message/explicit-selection flow, never from the batch function itself** — confirmed with her (2026-11-07) on the strip-attachments "wrap for alternative/related" fallback: a confirm dialog or an available undo doesn't substitute for her actually looking at a result when something is running across many messages at once. Report back a two-step flow (preview/insert a check copy, then a separate manual "trash it now") rather than one combined automatic action.
 
 ## Architecture
 
@@ -26,10 +27,10 @@ Single file, one inline `<script>`, organised in sections marked by comments: Au
 
 **Data model.** IndexedDB database `mailsweeper`, v1:
 - Store `msgs`, keyPath `id`, one row per message: `{id, from, date, size, labels, bad?}`. `from` is the lower-cased sender address (`parseSender`), `date` is `internalDate` in ms, `size` is `sizeEstimate` in bytes, `labels` are Gmail label ids. `bad` marks messages Gmail refuses to return (shown as `(unreadable)`).
-- Store `meta` (key/value): `scan` (page token for resuming), `history` (`{id, at}` for Sync), `trashLog` (last 10 trash runs, for Undo).
+- Store `meta` (key/value): `scan` (page token for resuming), `history` (`{id, at}` for Sync), `trashLog` (last 10 trash runs, for Undo), `attachIds` (cached ids with attachments for the Has-attachments filter, refetched only after a Sync), `stripLog` (crash safety: a stripped copy that's been inserted and verified but not yet trashed, so a resumed run never double-inserts), `stripRunLog` (last 10 strip runs, for Undo last strip).
 - Subjects are **not** cached in IndexedDB. They are fetched lazily for the visible Review page and kept in the in-memory `subjectCache`.
 
-**Tabs.** Data (connect, scan, Sync), Explore (space by type/age/size, top senders, biggest messages; tapping a row opens Review with filters applied via `applyExploreFilter`), Review (collapsible filters, paginated list of 25, selection, action bar with Trash and a ⋯ menu).
+**Tabs.** Data (connect, scan, Sync), Explore (space by type/age/size, top senders, biggest messages; tapping a row opens Review with filters applied via `applyExploreFilter`), Review (collapsible filters, paginated list of 25, selection, action bar with Trash and a ⋯ menu — Strip attachments, a label-and-apply row, Undo trash / Undo strip, and a collapsible Advanced section holding Inspect message; see "Strip attachments" below).
 
 **Useful helpers**
 - `api(path, opts)`: Gmail REST call with pacing, adaptive rate, retry/backoff on 429/5xx/network errors. Errors carry `.status` and `.path`; a 401 throws `Error('expired')` (handle with `expireForAction()`). It adds a JSON `Content-Type` whenever a body is present and uses the base URL `.../gmail/v1/users/me`, so a different base (for example the upload endpoint) needs its own fetch.
@@ -41,11 +42,18 @@ Single file, one inline `<script>`, organised in sections marked by comments: Au
 - Review state: `reviewRows` (all cached rows), `matchRows` (rows matching the filters), `selected` (a Set of chosen ids, empty by default), `selectedRows()`, `recomputeMatches(reset)`, `renderReviewPage()`, `refreshReview()`.
 - `say(text, alert)`: the status line. `keepAwake(on)`: screen wake lock during long operations.
 
+**Strip attachments.** For selected messages with a large attachment (`STRIP_MIN_BYTES`, 50KB and up): zips the attachments to her device, inserts a copy of the message with those attachments removed (same headers/thread/labels, a short note added, labelled `Mail Sweeper review`), then trashes the original. Inline images and attachments under the threshold are left in place; Sent messages are included.
+- `analyzeMime(rawBin)`: parses nested MIME recursively and classifies each part (remove/keep-small/inline/unsupported — signed, encrypted, attached-email).
+- `buildStrippedRaw(s, analysis, opts)`: rebuilds the message with target parts excised, byte-for-byte otherwise (`rebuildPart`/`hasRemovalBeneath`/`STRIP_DROP`). `opts.allowWrap` additionally allows wrapping an `alternative`/`related` root in a new `multipart/mixed` container — reachable only from the single-message preview's "Build wrapped copy to check…" button, **never** from the batch pipeline (see the safety rule above).
+- `stripOne(m)`: the per-message pipeline (download zip → insert → verify → trash original); used by the batch run `stripSelected()` / undone by `undoStrip()` via `stripRunLog`.
+- `previewStripFor(m)` / `previewStrip()`: read-only inspection for exactly one message (⋯ > Advanced > Inspect message). `copyStructure` / `buildStructureOutline` copy a plain-text MIME outline (content types, sizes, removal flags — no subject, sender, body or filenames) for sharing a skipped message's shape without exposing real content.
+
 ## UI conventions
 
 - Mobile-first and plain. CSS variables `--bg`, `--ink`, `--muted`, `--line`, `--accent`.
 - 48px tap targets, 16px inputs (prevents iOS zoom), `env(safe-area-inset-*)` padding, no tables.
-- Build DOM with `textContent` and `createElement` (not `innerHTML`) for anything that includes message data.
+- Build DOM with `textContent` and `createElement` (not `innerHTML`) for anything that includes message data. Static icon markup is fine as inline `<svg>` since it holds no message data.
+- Icons are inline SVG, 20px, `stroke="currentColor"`, outline style (Tabler-style paths), `aria-hidden="true"`. No icon font, no external library.
 - Long-running actions need progress feedback and a way to stop.
 
 ## Testing
@@ -53,7 +61,8 @@ Single file, one inline `<script>`, organised in sections marked by comments: Au
 There is no test suite in the repo. What has worked:
 - Syntax check: extract the inline script and run it through `new Function(script)`.
 - Logic and DOM: `jsdom` (npm) loading `index.html` with `runScripts: 'dangerously'`. In `beforeParse`, provide a fake `indexedDB` (Map-backed), `CSS.escape` and a stubbed `confirm`. Replace `api` with a fake Gmail that keeps server-side state and can fail on the Nth call. `api`, `putMany` and other function declarations can be reassigned on `window`; `const` helpers such as `getMeta` need `window.eval(...)`.
-- Visual: headless Chromium (Playwright) at 390x844, serving the folder with `python3 -m http.server`, with service workers blocked.
+- Visual: headless Chromium (Playwright) at 390x844, serving the folder with `python3 -m http.server`, with service workers blocked. Block `https://accounts.google.com/**` via `page.route` *before navigating*, or the real GSI script can reach the network and overwrite a stubbed `window.google`.
+- Gotcha: Chromium does not apply `display:none` to a bare `<svg>` via the HTML `hidden` attribute (jsdom won't catch this — it only showed up in a real Playwright render). Toggle `style.display` instead of `.hidden` when showing/hiding a raw SVG icon.
 - Real Gmail behaviour can only be verified by Jennifer trying it. Always say plainly what was and was not tested.
 
 ## Working on this repo

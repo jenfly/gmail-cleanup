@@ -74,7 +74,14 @@ Google will show an **"unverified app"** warning because the app is in Testing m
 1. **Connect Gmail** and approve access.
 2. **Scan Gmail.** Progress is saved as it goes, so you can **Pause** or close the tab and resume later with **Resume scan**.
 3. **Sync with Gmail** catches the app up after you delete, label or receive mail directly in Gmail. It asks Gmail what changed since the last sync, so it takes seconds instead of a full rescan. If it's been too long (Gmail keeps change history for roughly a week), it falls back to a quicker full check that only downloads details for new messages. Run it before you review or label anything.
-4. **Explore** shows where your storage is going: space by type and age, **Top senders** (the 25 senders using the most space), and biggest messages.
+4. **Explore** shows where your storage is going: space by type and age, **Top senders** (the 25 senders using the most space), and biggest messages. Tapping a row opens **Review** with that filter applied.
+5. **Review** lists messages matching your filters (sender, size, age, Sent/Archived, Has attachments). Select the ones you want, then use the bar at the bottom:
+   - **Trash** moves the selection to Gmail Trash. Starred and already-trashed messages are never included, even if selected.
+   - The **⋯** menu can also **apply a label** to the selection, and **strip attachments from selected…** — for each message with a large attachment, it zips the attachment(s) to your device, replaces the message with an attachment-free copy (labelled `Mail Sweeper review` so it's easy to find), and trashes the original. Messages without a large attachment are skipped and left alone.
+   - **Undo trash** and **Undo strip** reverse the most recent run of each.
+   - Under **Advanced**, **Inspect message** shows what a strip would remove from exactly one selected message, without changing anything — useful to check a message first, or to see why a message was skipped in a run.
+
+Emptying Gmail's Trash (to actually free the space) is a separate step you do in Gmail — this app never does it for you.
 
 The access token lasts about an hour. If a scan or sync pauses and the header shows "Reconnect needed," tap **Reconnect & resume** to carry on where you left off.
 
