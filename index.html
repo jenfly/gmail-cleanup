@@ -1270,7 +1270,7 @@ function renderStripPreview(m, r, a) {
       const insertBtn = add('button', 'Insert stripped copy to check…');
       insertBtn.onclick = () => insertStrippedCopy();
     } else if (buildStrippedRaw(lastPreview.rawBin, a, { allowWrap: true })) {
-      add('p', 'The attachment sits inside a part whose container would change meaning if a note were added directly (for example, an "alternative" body). This needs an extra wrapping container instead — review the result carefully before trashing the original.', 'muted');
+      add('p', 'This message needs an extra step to strip safely — review the result carefully before trashing the original.', 'muted');
       const wrapBtn = add('button', 'Build wrapped copy to check…');
       wrapBtn.onclick = () => insertStrippedCopy({ allowWrap: true });
     } else {
@@ -1587,6 +1587,19 @@ async function trashAfterInsert(m, check, freedBytes, trashBtn) {
     log.push({ at: Date.now(), pairs: [{ originalId: m.id, copyId: check.id, bytes: freedBytes || 0 }] });
     await setMeta('stripRunLog', log.slice(-10));
     recomputeMatches(false); await updateTrashInfo();
+    // If this message is still showing as "skipped" in a finished batch run's results (the
+    // common case: it was skipped there, then handled by hand from Preview), bring that row
+    // and the summary line up to date instead of leaving them stuck on the old skip.
+    const row = lastStripRun && lastStripRun.rowByMsgId.get(m.id);
+    if (row && !row.done) {
+      row.done = true;
+      row.li.className = 'stripped';
+      row.li.textContent = `${when(m)} · ${m.from || '(unknown sender)'} — stripped: ${fmt(freedBytes)} freed, copy ${check.id}`;
+      lastStripRun.counts.skippedN = Math.max(0, lastStripRun.counts.skippedN - 1);
+      lastStripRun.counts.strippedN++;
+      lastStripRun.counts.strippedBytes += freedBytes || 0;
+      lastStripRun.summaryEl.textContent = stripRunSummaryText();
+    }
     toast('Original moved to Trash. Undo last strip can restore it if needed.');
     $('stripPreview').hidden = true; lastPreview = null;
   } catch (e) {
@@ -1656,6 +1669,15 @@ async function insertStrippedCopy(opts = {}) {
 // is recorded in meta.stripLog; a later run on the same message skips straight to trashing
 // it instead of inserting a second copy.
 let stripBusy = false;
+// The most recent batch run's live state, so a message finished later by hand (via the manual
+// preview + "Trash the original now" flow, e.g. after Build wrapped copy to check…) can update
+// its row and the summary line in place instead of the panel staying stuck on "skipped".
+// {summaryEl, rowByMsgId: Map<id, {li, done}>, counts, total, tail}
+let lastStripRun = null;
+function stripRunSummaryText() {
+  const { counts, tail } = lastStripRun;
+  return `Done: ${msgs(counts.strippedN)} stripped (${fmt(counts.strippedBytes)} freed), ${counts.skippedN} skipped, ${counts.failedN} failed${tail ? ', ' + tail : ''}.`;
+}
 
 // Does the Gmail work for one message: insert the stripped copy (or reuse one left over
 // from an interrupted earlier run), then trash the original.
@@ -1680,7 +1702,7 @@ async function stripOne(m) {
       // in the run, so it can be reviewed individually from the single-message preview.
       const root = parsePart(rawBin, 0, rawBin.length);
       const needsWrap = (root.type === 'multipart/alternative' || root.type === 'multipart/related') && !!buildStrippedRaw(rawBin, analysis, { allowWrap: true });
-      return { status: 'skipped', detail: needsWrap ? 'needs an extra wrapping step — review it individually (Preview → Build wrapped copy to check…)' : 'could not safely rebuild this message’s structure' };
+      return { status: 'skipped', detail: needsWrap ? 'needs an extra wrapping step — review it individually' : 'could not safely rebuild this message’s structure' };
     }
 
     // Download before anything in Gmail changes, so nothing is lost if a later step fails.
@@ -1738,7 +1760,9 @@ async function stripSelected() {
     stopBtn.onclick = () => { go = false; stopBtn.disabled = true; stopBtn.textContent = 'Stopping…'; };
     box.scrollIntoView({ block: 'start', behavior: 'smooth' });
 
-    let strippedN = 0, strippedBytes = 0, skippedN = 0, failedN = 0, expired = false;
+    lastStripRun = { summaryEl, rowByMsgId: new Map(), counts: { strippedN: 0, strippedBytes: 0, skippedN: 0, failedN: 0 }, total: targets.length, tail: '' };
+    const counts = lastStripRun.counts;
+    let expired = false;
     const pairs = [];
     for (let i = 0; i < targets.length && go; i++) {
       const m = targets[i];
@@ -1754,11 +1778,12 @@ async function stripSelected() {
         openBtn.textContent = 'Open preview';
         openBtn.onclick = () => previewStripFor(m);
         li.append(openBtn);
+        lastStripRun.rowByMsgId.set(m.id, { li, done: false });
       }
       list.append(li);
-      if (result.status === 'stripped') { strippedN++; strippedBytes += result.freedBytes || 0; pairs.push({ originalId: m.id, copyId: result.copyId, bytes: result.freedBytes || 0 }); }
-      else if (result.status === 'skipped') skippedN++;
-      else failedN++;
+      if (result.status === 'stripped') { counts.strippedN++; counts.strippedBytes += result.freedBytes || 0; pairs.push({ originalId: m.id, copyId: result.copyId, bytes: result.freedBytes || 0 }); }
+      else if (result.status === 'skipped') counts.skippedN++;
+      else counts.failedN++;
     }
     keepAwake(false);
     stopBtn.hidden = true;
@@ -1772,9 +1797,9 @@ async function stripSelected() {
     recomputeMatches(false); await updateTrashInfo();
 
     if (expired) { expireForAction(); return; }
-    const tail = [!go ? 'stopped early' : null, excluded.length ? `${msgs(excluded.length)} newly starred/trashed skipped` : null].filter(Boolean).join(', ');
-    summaryEl.textContent = `Done: ${msgs(strippedN)} stripped (${fmt(strippedBytes)} freed), ${skippedN} skipped, ${failedN} failed${tail ? ', ' + tail : ''}.`;
-    toast(`Stripped ${msgs(strippedN)} (${fmt(strippedBytes)} freed). ${skippedN} skipped, ${failedN} failed.`);
+    lastStripRun.tail = [!go ? 'stopped early' : null, excluded.length ? `${msgs(excluded.length)} newly starred/trashed skipped` : null].filter(Boolean).join(', ');
+    summaryEl.textContent = stripRunSummaryText();
+    toast(`Stripped ${msgs(counts.strippedN)} (${fmt(counts.strippedBytes)} freed). ${counts.skippedN} skipped, ${counts.failedN} failed.`);
   } finally {
     stripBusy = false;
   }
