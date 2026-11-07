@@ -134,6 +134,10 @@
   </section>
   <section id="reviewTab" class="tab" aria-labelledby="reviewHeading">
     <h2 id="reviewHeading">Review messages</h2>
+    <div class="panel" id="reviewConnectNotice" hidden>
+      <p>Connect Gmail to load subject lines. Until then, messages below show sender and size only, from the local cache.</p>
+      <button id="reviewConnect" class="primary">Connect Gmail</button>
+    </div>
     <div class="panel">
       <details id="reviewFilters" open>
         <summary>Filters <span id="filterSummary" class="muted"></span><span class="chev" aria-hidden="true"></span></summary>
@@ -225,6 +229,7 @@ const say = (t, alert = false) => {
 function updateStatusVisibility() {
   document.body.dataset.tab = activeTab;
   document.body.classList.toggle('status-attention', !!(running || syncing || $('status').classList.contains('alert')));
+  $('reviewConnectNotice').hidden = !!token;
 }
 // Messages from background retries must never overwrite a final status like "Paused" or "Session expired".
 const sayIfRunning = t => { if (running) say(t); };
@@ -274,6 +279,7 @@ function expireForAction() {
   $('connect').classList.remove('connected'); $('connectedLabel').classList.remove('visible');
   $('dataAction').disabled = true;
   say('Your Gmail session expired. Tap Reconnect Gmail, then retry the action. Check Gmail first if a bulk action was interrupted.', true);
+  updateStatusVisibility();
 }
 function needReconnect() {
   needsReconnect = true;
@@ -283,6 +289,7 @@ function needReconnect() {
   $('connect').textContent = 'Reconnect & resume';
   $('connect').classList.remove('connected'); $('connectedLabel').classList.remove('visible');
   say('Paused: your Gmail session expired (they last about an hour). Tap "Reconnect & resume" to carry on where you left off. Nothing was lost.', true);
+  updateStatusVisibility();
 }
 function connect() {
   if (!window.google) { say('Google sign-in is still loading. Try again.'); return; }
@@ -297,6 +304,8 @@ function connect() {
       $('connect').textContent = 'Connect Gmail';
       $('connect').classList.add('connected'); $('connectedLabel').classList.add('visible');
       updateDataAction();
+      updateStatusVisibility();
+      if (activeTab === 'review') refreshReview(); // load subjects now that we're connected
       if (resume) (resumeFn || scan)(); // came here because the session expired: carry on automatically
       else say('Connected. Choose Scan Gmail to begin. Sessions last about an hour.');
     }
@@ -814,7 +823,7 @@ function renderReviewPage() {
     const cb=document.createElement('input');cb.type='checkbox';cb.checked=selected.has(m.id);cb.setAttribute('aria-label','Select message');
     cb.addEventListener('change',()=>{if(cb.checked)selected.add(m.id);else selected.delete(m.id);updateSelectionSummary();});
     const text=document.createElement('div');text.className='matchtext';
-    const subject=document.createElement('span');subject.className='subject';subject.textContent=subjectCache.get(m.id)||m.from||'(unknown sender)';
+    const subject=document.createElement('span');subject.className='subject';subject.textContent=subjectCache.get(m.id)||(token?(m.from||'(unknown sender)'):'(subject not loaded)');
     const sub=document.createElement('small');sub.className='sub';sub.textContent=`${m.from||'(unknown sender)'} · ${when(m)}`;text.append(subject,sub);
     wrap.append(cb,text);
     const size=document.createElement('span');size.className='size';size.textContent=fmt(m.size);
@@ -1538,6 +1547,7 @@ async function openReview() { await refreshReview(); }
 
 document.body.dataset.tab='data';
 $('connect').onclick = connect;
+$('reviewConnect').onclick = connect;
 $('dataAction').onclick = runDataAction;
 $('pause').onclick = () => { running = false; };
 $('tabData').onclick = () => switchTab('data');
