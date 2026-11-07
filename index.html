@@ -1147,6 +1147,7 @@ async function previewStrip() {
   if (!token) { say('Tap Connect Gmail first.', true); return; }
   const rows = selectedRows();
   if (rows.length !== 1) { say('Select exactly one message to preview.', true); return; }
+  say('Reading the message from Gmail…'); // clears any earlier alert (e.g. the line above)
   const m = rows[0], box = $('stripPreview');
   box.replaceChildren(); box.hidden = false;
   const note = document.createElement('p'); note.textContent = 'Reading the message from Gmail…'; box.append(note);
