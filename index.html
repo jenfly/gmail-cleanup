@@ -74,11 +74,17 @@
   #optional label { display:block; margin-top:8px; color:var(--muted); }
   #reviewTab { padding-bottom:132px; }
   #reviewListPanel { padding-bottom:10px; }
-  #reviewFilters summary { list-style:none; }
+  #reviewFilters summary { list-style:none; gap:.4em; }
+  #reviewFilters .chev { flex:none; width:24px; height:24px; margin-left:auto; display:flex; align-items:center; justify-content:center; transition:transform .2s; }
+  #reviewFilters .chev::before { content:""; width:9px; height:9px; border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); transform:translateY(-3px) rotate(45deg); }
+  #reviewFilters:not([open]) .chev { transform:rotate(180deg); }
   #reviewFilters summary::-webkit-details-marker { display:none; }
   #typeChips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-  .type-chip { display:flex; align-items:center; gap:7px; min-height:42px; padding:7px 10px; border:1px solid var(--line); border-radius:22px; background:#fff; color:var(--ink); font-size:.9rem; }
-  .type-chip input { width:18px; height:18px; min-height:18px; margin:0; accent-color:var(--accent); }
+  #filterFields #typeChips .type-chip { position:relative; display:block; margin:0; color:var(--ink); font-size:.9rem; }
+  .type-chip input { position:absolute; inset:0; width:100%; height:100%; min-height:0; margin:0; opacity:0; cursor:pointer; }
+  .type-chip span { display:flex; align-items:center; min-height:44px; padding:8px 16px; border:1px solid var(--line); border-radius:22px; background:#fff; color:var(--ink); user-select:none; transition:background .15s,color .15s,border-color .15s; }
+  .type-chip input:checked + span { background:var(--ink); border-color:var(--ink); color:#fff; }
+  .type-chip input:focus-visible + span { outline:3px solid var(--accent); outline-offset:2px; }
   #selectionSummary { margin:6px 0 12px; }
   #showing { margin:18px 0 4px; }
   #pagination { margin-top:4px; }
@@ -120,7 +126,7 @@
     <h2 id="reviewHeading">Review messages</h2>
     <div class="panel">
       <details id="reviewFilters" open>
-        <summary>Filters <span id="filterSummary" class="muted"></span></summary>
+        <summary>Filters <span id="filterSummary" class="muted"></span><span class="chev" aria-hidden="true"></span></summary>
         <div id="filterFields">
           <label>Sender contains <input id="fSender" type="text" placeholder="e.g. caltech.edu" autocomplete="off"></label>
           <div class="fieldgrid">
@@ -131,14 +137,14 @@
           </div>
           <div class="field"><label>Type (select any combination)</label>
             <div id="typeChips" role="group" aria-label="Message types">
-              <label class="type-chip"><input type="checkbox" data-type="sent"> Sent</label>
-              <label class="type-chip"><input type="checkbox" data-type="notsent"> Everything except Sent</label>
-              <label class="type-chip"><input type="checkbox" data-type="promotions"> Promotions</label>
-              <label class="type-chip"><input type="checkbox" data-type="social"> Social</label>
-              <label class="type-chip"><input type="checkbox" data-type="updates"> Updates</label>
-              <label class="type-chip"><input type="checkbox" data-type="forums"> Forums</label>
-              <label class="type-chip"><input type="checkbox" data-type="inbox"> Inbox</label>
-              <label class="type-chip"><input type="checkbox" data-type="archived"> Archived</label>
+              <label class="type-chip"><input type="checkbox" data-type="sent"><span>Sent</span></label>
+              <label class="type-chip"><input type="checkbox" data-type="notsent"><span>Everything except Sent</span></label>
+              <label class="type-chip"><input type="checkbox" data-type="promotions"><span>Promotions</span></label>
+              <label class="type-chip"><input type="checkbox" data-type="social"><span>Social</span></label>
+              <label class="type-chip"><input type="checkbox" data-type="updates"><span>Updates</span></label>
+              <label class="type-chip"><input type="checkbox" data-type="forums"><span>Forums</span></label>
+              <label class="type-chip"><input type="checkbox" data-type="inbox"><span>Inbox</span></label>
+              <label class="type-chip"><input type="checkbox" data-type="archived"><span>Archived</span></label>
             </div>
           </div>
           <div class="row"><button id="clearFilters">Clear filters</button></div>
@@ -592,7 +598,7 @@ async function sync() {
 
 /* ---------- Explore + Review ---------- */
 const everything = async () => (await run('msgs', 'readonly', st => st.getAll())).filter(m => !m.bad);
-const when = m => new Date(m.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+const when = m => m.date ? new Date(m.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Unknown date';
 const AUTO = ['CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS', 'CATEGORY_SOCIAL'];
 const TYPE_TESTS = {
   sent: l => l.includes('SENT'),
@@ -605,7 +611,7 @@ const TYPE_TESTS = {
   archived: l => !l.includes('INBOX') && !l.includes('SENT') && !AUTO.some(c=>l.includes(c))
 };
 const REVIEW_TYPES = Object.keys(TYPE_TESTS);
-let reviewRows = [], matchRows = [], excluded = new Set(), reviewPage = 1;
+let reviewRows = [], matchRows = [], selected = new Set(), reviewPage = 1;
 let activeTab = 'data', exploreMode = 'space', subjectCache = new Map(), renderGeneration = 0;
 let reviewVisited = false, reviewEntryFromExplore = false;
 const PAGE_SIZE = 25;
@@ -734,7 +740,7 @@ function matching() {
     return true;
   }).sort((a,b)=>b.size-a.size||b.date-a.date);
 }
-function resetSelection(){ excluded=new Set(); }
+function resetSelection(){ selected=new Set(); }
 function recomputeMatches(reset=true) {
   if(reset) { resetSelection(); reviewPage=1; }
   matchRows=matching();
@@ -742,25 +748,30 @@ function recomputeMatches(reset=true) {
   $('filterSummary').textContent=` · ${matchRows.length.toLocaleString()} matches · ${fmt(bytes)}`;
   renderReviewPage();
 }
-function selectedRows(){return matchRows.filter(m=>!excluded.has(m.id));}
+function selectedRows(){return matchRows.filter(m=>selected.has(m.id));}
 function updateSelectionSummary(){
-  const selected=selectedRows(), bytes=selected.reduce((n,m)=>n+m.size,0);
-  $('selectionSummary').textContent=`${msgs(selected.length)} selected · ${fmt(bytes)}`;
-  $('trashSelected').textContent=`Trash ${selected.length.toLocaleString()}, ${fmt(bytes)}`;
-  $('trashSelected').disabled=!selected.length||!token;
-  const all=matchRows.length>0&&selected.length===matchRows.length;
-  $('selectAll').checked=all; $('selectAll').indeterminate=selected.length>0&&!all;
+  const chosen=selectedRows(), bytes=chosen.reduce((n,m)=>n+m.size,0);
+  $('selectionSummary').textContent=`${msgs(chosen.length)} selected · ${fmt(bytes)}`;
+  $('trashSelected').textContent=`Trash ${chosen.length.toLocaleString()}, ${fmt(bytes)}`;
+  $('trashSelected').disabled=!chosen.length||!token;
+  const all=matchRows.length>0&&chosen.length===matchRows.length;
+  $('selectAll').checked=all; $('selectAll').indeterminate=chosen.length>0&&!all;
+}
+function setSubject(id,text) {
+  // Only the subject line: the sender and date line below it must stay.
+  const node=document.querySelector(`[data-message-id="${CSS.escape(id)}"] .subject`);
+  if(node) node.textContent=text;
 }
 async function loadSubjects(rows,generation) {
   if(!token) return;
   for(const m of rows) {
     if(generation!==renderGeneration||activeTab!=='review') return;
-    if(subjectCache.has(m.id)){const node=document.querySelector(`[data-message-id="${CSS.escape(m.id)}"] .subject`);if(node)node.textContent=subjectCache.get(m.id);continue;}
+    if(subjectCache.has(m.id)){setSubject(m.id,subjectCache.get(m.id));continue;}
     try {
       const r=await api(`/messages/${m.id}?format=metadata&metadataHeaders=Subject&fields=payload/headers`);
       const headers=(r.payload&&r.payload.headers)||[], h=headers.find(x=>x.name&&x.name.toLowerCase()==='subject');
       const subject=h&&h.value?h.value:'(no subject)'; subjectCache.set(m.id,subject);
-      if(generation===renderGeneration&&activeTab==='review') {const node=document.querySelector(`[data-message-id="${CSS.escape(m.id)}"] .matchtext`);if(node)node.textContent=subject;}
+      if(generation===renderGeneration&&activeTab==='review') setSubject(m.id,subject);
     } catch(e) {if(e.message==='expired'){expireForAction();return;} }
   }
 }
@@ -777,11 +788,11 @@ function renderReviewPage() {
   rows.forEach(m=>{
     const li=document.createElement('li');li.dataset.messageId=m.id;
     const wrap=document.createElement('div');wrap.className='checkrow';
-    const cb=document.createElement('input');cb.type='checkbox';cb.checked=!excluded.has(m.id);cb.setAttribute('aria-label','Select message');
-    cb.addEventListener('change',()=>{if(cb.checked)excluded.delete(m.id);else excluded.add(m.id);updateSelectionSummary();});
+    const cb=document.createElement('input');cb.type='checkbox';cb.checked=selected.has(m.id);cb.setAttribute('aria-label','Select message');
+    cb.addEventListener('change',()=>{if(cb.checked)selected.add(m.id);else selected.delete(m.id);updateSelectionSummary();});
     const text=document.createElement('div');text.className='matchtext';
-    const subject=document.createElement('span');subject.className='subject';subject.textContent=subjectCache.get(m.id)||m.from;
-    const sub=document.createElement('small');sub.className='sub';sub.textContent=`${m.from} · ${when(m)}`;text.append(subject,sub);
+    const subject=document.createElement('span');subject.className='subject';subject.textContent=subjectCache.get(m.id)||m.from||'(unknown sender)';
+    const sub=document.createElement('small');sub.className='sub';sub.textContent=`${m.from||'(unknown sender)'} · ${when(m)}`;text.append(subject,sub);
     wrap.append(cb,text);
     const size=document.createElement('span');size.className='size';size.textContent=fmt(m.size);
     li.append(wrap,size);list.append(li);
@@ -887,7 +898,7 @@ $('tabReview').onclick = () => switchTab('review');
 $('exploreSpace').onclick = () => setExploreMode('space');
 $('exploreSenders').onclick = () => setExploreMode('senders');
 $('exploreBiggest').onclick = () => setExploreMode('biggest');
-$('selectAll').onchange = () => { if ($('selectAll').checked) excluded.clear(); else matchRows.forEach(m=>excluded.add(m.id)); renderReviewPage(); };
+$('selectAll').onchange = () => { if ($('selectAll').checked) matchRows.forEach(m=>selected.add(m.id)); else selected.clear(); renderReviewPage(); };
 $('prevPage').onclick = () => { reviewPage--; renderReviewPage(); $('reviewHeading').scrollIntoView({block:'start',behavior:'smooth'}); };
 $('nextPage').onclick = () => { reviewPage++; renderReviewPage(); $('reviewHeading').scrollIntoView({block:'start',behavior:'smooth'}); };
 $('pageNumber').onchange = () => { const n=Number($('pageNumber').value); if(Number.isInteger(n)&&n>=1&&n<=Math.max(1,Math.ceil(matchRows.length/PAGE_SIZE))){reviewPage=n;renderReviewPage();}else $('pageNumber').value=reviewPage; };
