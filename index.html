@@ -24,7 +24,7 @@
   #connIndicator.ok::before { background:var(--accent); }
   #connIndicator.alert { color:#8a2c2c; font-weight:700; }
   #connIndicator.alert::before { background:#8a2c2c; }
-  #status { color:var(--muted); margin:10px 0 0; min-height:1.35em; font-size:.9rem; }
+  #status { color:var(--muted); margin:10px 0 0; min-height:1.35em; font-size:.9rem; white-space:pre-line; }
   #status.alert { color:var(--ink); font-weight:650; }
   #connectedLabel { display:none; color:var(--muted); font-weight:600; padding:10px 0; }
   #connect.connected { display:none; }
@@ -1909,7 +1909,7 @@ async function updateDataAction(setStatus) {
   if(setStatus&&!running&&!syncing&&!needsReconnect){
     if(!token) say(count?'Connect Gmail to sync.':'Connect your Gmail account to scan your messages. Nothing leaves this device except requests to Google.');
     else if(history&&history.id) say("Ready to sync. You'll need to reconnect about an hour after signing in.");
-    else say("Ready to scan. The first scan of a large mailbox can take hours. Keep this screen open while it runs, because switching to another app may pause it. About an hour after you sign in, Gmail signs you out and you'll need to reconnect to carry on. Your progress is saved, so you can also pause and resume any time.");
+    else say("Ready to scan. The first scan of a large mailbox can take hours.\n\nKeep this screen open while it runs — switching apps may pause it.\n\nAbout an hour after you sign in, Gmail signs you out. Reconnect to carry on; progress is saved, so you can pause and resume any time.");
   }
 }
 async function runDataAction() {
