@@ -428,7 +428,7 @@ async function api(path, opts = {}) {
       const text = await r.text();
       return text ? JSON.parse(text) : null; // batchModify answers 204 with no body
     }
-    if (r.status === 401) { running = false; throw new Error('expired'); } // stop every worker
+    if (r.status === 401) throw new Error('expired');
     const body = await r.json().catch(() => ({}));
     const err = body.error || {};
     const reason = (err.errors && err.errors[0] && err.errors[0].reason) || '';
@@ -498,7 +498,10 @@ async function pool(items, n, fn) {
   let i = 0;
   const g = scanGen; // workers from an earlier, aborted scan must not keep going
   await Promise.all(Array.from({ length: n }, async () => {
-    while (running && g === scanGen && i < items.length) await fn(items[i++]);
+    while (running && g === scanGen && i < items.length) {
+      try { await fn(items[i++]); }
+      catch (e) { if (e.message === 'expired') running = false; throw e; }
+    }
   }));
 }
 function parseSender(headers) {
