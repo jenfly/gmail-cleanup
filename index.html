@@ -77,12 +77,29 @@
   #toast.alert #toastInner { background:#8a2c2c; border-color:#8a2c2c; }
   #toast.alert #toastText { font-weight:650; }
   #toastClose { flex:none; width:48px; height:48px; min-height:48px; padding:0; font-size:1.1rem; border-radius:50%; border-color:rgba(255,255,255,.5); color:#fff; }
-  #trashSelected { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #trashSelected { flex:1; min-width:0; display:flex; align-items:center; justify-content:center; gap:8px; overflow:hidden; }
+  #trashSelected svg { flex:none; }
+  #trashSelectedText { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #moreActions { position:relative; flex:none; width:48px; min-width:48px; height:48px; padding:0; font-size:1.4rem; }
+  #moreActions svg { display:block; margin:auto; }
   #moreMenu { position:absolute; right:0; bottom:54px; width:min(290px,calc(100vw - 32px)); padding:12px; background:var(--bg); border:1px solid var(--line); border-radius:10px; box-shadow:0 4px 18px #14232b22; }
   #moreMenu[hidden] { display:none; }
   #moreMenu button { width:100%; margin-top:8px; }
-  #moreMenu label { display:block; margin-top:10px; color:var(--muted); }
+  #moreMenu .menuRow { display:flex; align-items:center; gap:10px; min-height:44px; text-align:left; }
+  #moreMenu .menuRow svg { flex:none; }
+  #moreMenu .menuRow span { flex:1; min-width:0; }
+  #moreMenu .menuEmphasis { font-weight:650; }
+  #moreMenu .menuDivider { border:0; border-top:1px solid var(--line); margin:10px 0; }
+  #moreMenu .menuLabelRow { display:flex; align-items:center; gap:8px; margin-top:8px; min-height:44px; }
+  #moreMenu .menuLabelRow svg { flex:none; color:var(--muted); }
+  #moreMenu .menuLabelRow input { flex:1; width:auto; min-width:0; margin-top:0; }
+  #moreMenu .menuLabelRow button { width:auto; margin-top:0; flex:none; padding:10px 14px; }
+  #moreMenu .menuUndoRow { display:flex; gap:8px; margin-top:8px; }
+  #moreMenu .menuUndoRow button { width:auto; margin-top:0; flex:1; }
+  #moreMenu .menuQuiet { border-color:var(--line); color:var(--muted); }
+  #moreMenu #advancedSection { margin-top:4px; }
+  #moreMenu #advancedSection[hidden] { display:none; }
+  #moreMenu #advancedSection .menuInspectNote { margin:4px 0 0; font-size:.82rem; }
   #reviewTab { padding-bottom:132px; }
   #reviewListPanel { padding-bottom:10px; }
   #reviewFilters summary { list-style:none; gap:.4em; }
@@ -207,16 +224,47 @@
     </div>
     <div id="actions">
       <div id="actionInner">
-        <button id="trashSelected" class="danger" disabled>Trash 0</button>
+        <button id="trashSelected" class="danger" disabled>
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+          <span id="trashSelectedText">Trash 0 · 0 B</span>
+        </button>
         <button id="moreActions" aria-label="More actions" aria-expanded="false" aria-controls="moreMenu">⋯</button>
       </div>
       <div id="moreMenu" hidden>
-        <button id="undoTrash">Undo last trash</button>
-        <button id="previewStrip">Preview strip attachments…</button>
-        <button id="stripSelectedBtn">Strip attachments from selected…</button>
-        <button id="undoStripBtn">Undo last strip</button>
-        <label>Label name <input id="fLabel" type="text" value="Sweeper review"></label>
-        <button id="applyLabel">Apply label to selected</button>
+        <button id="stripSelectedBtn" class="menuRow menuEmphasis">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -3 -3l-6.5 6.5a4.5 4.5 0 0 0 4.5 4.5" /></svg>
+          <span>Strip attachments from selected…</span>
+        </button>
+        <div class="menuLabelRow">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 7.5h-.01" /><path d="M3 10v-4a2 2 0 0 1 2 -2h4.5c.313 0 .613 .125 .834 .346l9 9a1.2 1.2 0 0 1 0 1.708l-7.5 7.5a1.2 1.2 0 0 1 -1.708 0l-9 -9c-.221 -.221 -.346 -.521 -.346 -.834z" /></svg>
+          <input id="fLabel" type="text" value="Sweeper review" aria-label="Label name">
+          <button id="applyLabel" class="menuEmphasis">Apply</button>
+        </div>
+        <hr class="menuDivider">
+        <div class="menuUndoRow">
+          <button id="undoTrash" class="menuRow menuQuiet">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 13l-4 -4l4 -4" /><path d="M5 9h7a4 4 0 1 1 0 8h-1" /></svg>
+            <span>Undo trash</span>
+          </button>
+          <button id="undoStripBtn" class="menuRow menuQuiet">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 13l-4 -4l4 -4" /><path d="M5 9h7a4 4 0 1 1 0 8h-1" /></svg>
+            <span>Undo strip</span>
+          </button>
+        </div>
+        <hr class="menuDivider">
+        <button id="advancedToggle" class="menuRow" aria-expanded="false" aria-controls="advancedSection">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5" /></svg>
+          <span>Advanced</span>
+          <svg id="advancedChevDown" aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg>
+          <svg id="advancedChevUp" aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M6 15l6 -6l6 6" /></svg>
+        </button>
+        <div id="advancedSection" hidden>
+          <button id="previewStrip" class="menuRow">
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="7" /><path d="M8 9l-1.5 1.5l1.5 1.5" /><path d="M12 9l1.5 1.5l-1.5 1.5" /><path d="M21 21l-4.3 -4.3" /></svg>
+            <span>Inspect message</span>
+          </button>
+          <p class="hint menuInspectNote">Select one message. Shows what a strip would remove, with a Copy structure button.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -829,7 +877,7 @@ function selectedRows(){return matchRows.filter(m=>selected.has(m.id));}
 function updateSelectionSummary(){
   const chosen=selectedRows(), bytes=chosen.reduce((n,m)=>n+m.size,0);
   $('selectionSummary').textContent=`${msgs(chosen.length)} selected · ${fmt(bytes)}`;
-  $('trashSelected').textContent=`Trash ${chosen.length.toLocaleString()} · ${fmt(bytes)}`;
+  $('trashSelectedText').textContent=`Trash ${chosen.length.toLocaleString()} · ${fmt(bytes)}`;
   $('trashSelected').disabled=!chosen.length||!token;
   const all=matchRows.length>0&&chosen.length===matchRows.length;
   $('selectAll').checked=all; $('selectAll').indeterminate=chosen.length>0&&!all;
@@ -920,6 +968,7 @@ function cacheMarker(label,add) {
 }
 const labelName=()=>$('fLabel').value.trim();
 async function applyLabel() {
+  $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
   const name=labelName(), rows=selectedRows();
   if(!token){toast('Tap Connect Gmail first.',{alert:true});return;} if(!name){toast('Enter a label name.',{alert:true});return;} if(!rows.length){toast('No messages are selected.',{alert:true});return;}
   try {const id=await ensureLabel(name);await batchLabel(rows.map(m=>m.id),{addLabelIds:[id]},cacheMarker(id,true));toast(`Added "${name}" to ${msgs(rows.length)}.`);}
@@ -979,6 +1028,7 @@ async function trashSelected() {
   } catch(e){if(e.message==='expired')expireForAction();else toast('Trash stopped: '+e.message+'. Sync with Gmail before retrying.',{alert:true});}
 }
 async function undoTrash() {
+  $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
   if(!token){toast('Tap Connect Gmail first.',{alert:true});return;}
   try {
     const log=(await getMeta('trashLog'))||[],last=log[log.length-1];if(!last){toast('Nothing to undo.');return;}
@@ -1309,7 +1359,7 @@ async function previewStripFor(m) {
 async function previewStrip() {
   $('moreMenu').hidden = true; $('moreActions').setAttribute('aria-expanded', 'false');
   const rows = selectedRows();
-  if (rows.length !== 1) { toast('Select exactly one message to preview.',{alert:true}); return; }
+  if (rows.length !== 1) { toast('Select exactly one message to inspect.',{alert:true}); return; }
   await previewStripFor(rows[0]);
 }
 /* ---------- Strip attachments, stage 2: zip and download ---------- */
@@ -1891,8 +1941,22 @@ document.querySelectorAll('#typeChips input').forEach(cb=>cb.addEventListener('c
   recomputeMatches(true);
 }));
 $('clearFilters').onclick = () => { ['fSender','fSizeFrom','fSizeTo','fAgeFrom','fAgeTo'].forEach(id=>$(id).value='');document.querySelectorAll('#typeChips input').forEach(cb=>cb.checked=false);$('fAttach').checked=false;recomputeMatches(true); };
-$('moreActions').onclick = () => { const menu=$('moreMenu'), open=menu.hidden; menu.hidden=!open; $('moreActions').setAttribute('aria-expanded',String(open)); };
+function collapseAdvanced(){
+  $('advancedSection').hidden = true;
+  $('advancedToggle').setAttribute('aria-expanded','false');
+  $('advancedChevDown').style.display = ''; $('advancedChevUp').style.display = 'none';
+}
+$('moreActions').onclick = () => {
+  const menu=$('moreMenu'), open=menu.hidden; menu.hidden=!open; $('moreActions').setAttribute('aria-expanded',String(open));
+  if (open) collapseAdvanced(); // Advanced starts collapsed every time the menu opens
+};
 document.addEventListener('click',e=>{if(!$('moreMenu').contains(e.target)&&e.target!==$('moreActions')){$('moreMenu').hidden=true;$('moreActions').setAttribute('aria-expanded','false');}});
+$('advancedToggle').onclick = () => {
+  const opening=$('advancedSection').hidden;
+  $('advancedSection').hidden=!opening;
+  $('advancedToggle').setAttribute('aria-expanded',String(opening));
+  $('advancedChevDown').style.display=opening?'none':''; $('advancedChevUp').style.display=opening?'':'none';
+};
 $('trashSelected').onclick = trashSelected;
 $('undoTrash').onclick = undoTrash;
 $('applyLabel').onclick = applyLabel;
