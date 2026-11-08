@@ -110,9 +110,9 @@
   #reviewTab { padding-bottom:132px; }
   #reviewListPanel { padding-bottom:10px; }
   #reviewFilters summary { list-style:none; gap:.4em; }
-  #reviewFilters .chev { flex:none; width:24px; height:24px; margin-left:auto; display:flex; align-items:center; justify-content:center; transition:transform .2s; }
-  #reviewFilters .chev::before { content:""; width:9px; height:9px; border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); transform:translateY(-3px) rotate(45deg); }
-  #reviewFilters:not([open]) .chev { transform:rotate(180deg); }
+  #reviewFilters .chev,#copyDevice .chev { flex:none; width:24px; height:24px; margin-left:auto; display:flex; align-items:center; justify-content:center; transition:transform .2s; }
+  #reviewFilters .chev::before,#copyDevice .chev::before { content:""; width:9px; height:9px; border-right:2px solid var(--ink); border-bottom:2px solid var(--ink); transform:translateY(-3px) rotate(45deg); }
+  #reviewFilters:not([open]) .chev,#copyDevice:not([open]) .chev { transform:rotate(180deg); }
   #reviewFilters summary::-webkit-details-marker { display:none; }
   #typeChips, #attachChips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   #filterFields .type-chip { position:relative; display:block; margin:0; color:var(--ink); font-size:.9rem; }
@@ -147,6 +147,13 @@
   #startNotice[hidden] { display:none; }
   #startNotice p { margin:0 0 10px; }
   #startNotice button { width:auto; min-height:40px; padding:8px 14px; }
+  #copyDevice { margin-top:14px; border-top:1px solid var(--line); padding-top:4px; }
+  #copyDevice summary { min-height:44px; display:flex; align-items:center; gap:6px; font-weight:650; cursor:pointer; list-style:none; }
+  #copyDevice summary::-webkit-details-marker { display:none; }
+  #copyDevice .hint { margin:4px 0 12px; }
+  #copyDevice #exportCache,#copyDevice #restoreCache { display:block; width:100%; }
+  #copyDevice #restoreCache { margin-top:8px; }
+  #copyDevice #copyHelp { margin-top:6px; }
   #guideOverlay { position:fixed; z-index:9; inset:0; background:var(--bg); display:flex; flex-direction:column; }
   #guideOverlay[hidden] { display:none; }
   #guideTop { flex:none; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:max(10px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left)); border-bottom:1px solid var(--line); }
@@ -212,9 +219,9 @@
       <h3>Quick start</h3>
       <p class="hint">Five steps to your first cleanup.</p>
       <ol id="guideSteps">
-        <li><span class="num" aria-hidden="true">1</span><div><strong>Pick your device first</strong><span class="what">The scan is stored only in this browser and can’t move to another device. Decide where you’ll clean up before you start. Clearing site data or uninstalling the app means scanning again.</span></div></li>
+        <li><span class="num" aria-hidden="true">1</span><div><strong>Pick where to scan first</strong><span class="what">The scan is saved in this browser, and it can take hours, so start on whichever device you can leave running. When it's done you can copy it to your other devices and clean up from any of them. Clearing site data or uninstalling the app erases that device's copy.</span></div></li>
         <li><span class="num" aria-hidden="true">2</span><div><strong>Sign in with Google</strong><span class="what">Google shows an “unverified app” warning. That’s expected: tap Advanced, then Go to Mail Sweeper (unsafe).</span></div></li>
-        <li><span class="num" aria-hidden="true">3</span><div><strong>Scan your mail</strong><span class="what">It may take hours. Keep the screen on while it runs; you can pause and resume any time.</span></div></li>
+        <li><span class="num" aria-hidden="true">3</span><div><strong>Scan your mail</strong><span class="what">It may take hours. Keep the screen on while it runs; you can pause and resume any time. When it finishes, you can copy the scan to another device (Data tab, Copy to another device).</span></div></li>
         <li><span class="num" aria-hidden="true">4</span><div><strong>Explore, then Review</strong><span class="what">See where the space goes, tap a row, then select messages and move them to Trash.</span></div></li>
         <li><span class="num" aria-hidden="true">5</span><div><strong>Empty Trash in Gmail</strong><span class="what">This is what actually frees space. Mail Sweeper never does it for you.</span></div></li>
       </ol>
@@ -223,10 +230,10 @@
     <h3 class="guideMore">More detail</h3>
     <div id="guideList">
       <details id="guideStart">
-        <summary><span>Before you start: pick your device</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <summary><span>Before you start: where to scan</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
         <div class="guideDetail">
-          <p>The first scan can take hours, because Gmail limits how fast it lets any app read your mail. What gets scanned is stored only on this device, in this browser — it doesn't sync between devices. Decide which device you'll do your cleanup on before you start scanning.</p>
-          <p>Clearing this browser's site data, or uninstalling the home-screen app, wipes that cache and means doing the scan again from scratch — so don't do that casually.</p>
+          <p>The first scan can take hours, because Gmail limits how fast it lets any app read your mail. What gets scanned is stored only on this device, in this browser. It isn't shared between devices automatically, but once the scan is done you can copy it to another device (see "Copy to another device" below) — so scan on whichever device you can leave running.</p>
+          <p>Clearing this browser's site data, or uninstalling the home-screen app, wipes that cache and means doing the scan again from scratch, unless you kept a copy of it in a file — so don't do that casually.</p>
         </div>
       </details>
       <details id="guideInstall">
@@ -236,14 +243,15 @@
           <p id="installState" hidden></p>
           <button id="installBtn" class="primary" hidden>Install Mail Sweeper</button>
           <p id="installHow">Android (Chrome): tap the three-dot menu, then Install app (or Add to Home screen). iPhone: open this page in Safari, tap the Share icon, then Add to Home Screen.</p>
-          <p id="installIos">On iPhone, install before your first scan. A home-screen app can keep its own storage, separate from Safari's, so a scan done in Safari may not show up in the installed app, and you'd have to start the scan again.</p>
-          <p>Once a scan is stored, don't uninstall the app or clear this browser's site data. See "Before you start" above.</p>
+          <p id="installIos">On iPhone, install before your first scan. A home-screen app can keep its own storage, separate from Safari's, so a scan done in Safari may not show up in the installed app, and you'd have to start the scan again. Copying the scan (see "Copy to another device") may carry it between Safari and the installed app, but this hasn't been tested on iPhone.</p>
+          <p>Once a scan is stored, don't uninstall the app or clear this browser's site data unless you've kept a copy of the scan in a file. See "Before you start" above.</p>
         </div>
       </details>
       <details id="guidePrivacy">
         <summary><span>Privacy</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
         <div class="guideDetail">
           <p>Everything runs in your own browser. Nothing is sent anywhere except to Google's Gmail API, to read and manage your mail. Jennifer can't see your mail, even though she manages who's allowed to sign in.</p>
+          <p>If you export a copy of your saved scan (see "Copy to another device"), that file is created on your device and goes only where you put it — the app never uploads it anywhere.</p>
         </div>
       </details>
       <details id="guideSignin">
@@ -265,6 +273,14 @@
         <summary><span>Sync</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
         <div class="guideDetail">
           <p>Sync catches the app up on anything that changed directly in Gmail — new mail, deletions, labels — since the last time. It only takes a few seconds. Run it before reviewing or labelling anything.</p>
+        </div>
+      </details>
+      <details id="guideCopy">
+        <summary><span>Copy to another device</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Scan once, then copy the scan to your other devices, so you can clean up from whichever one is handy. Export saves it to a file; Restore loads that file on another device and replaces the scan saved there. Afterwards each device syncs on its own, and Undo covers only what you did on that device.</p>
+          <p>To copy: tap Export, move the file to the other device (email, a cloud drive, a USB stick), sign in there with the same Google account, and tap Restore from file. Both sync with Gmail automatically. Copy again only if a device has sat unused for over a week.</p>
+          <p>The file lists sender addresses, dates and sizes for your whole mailbox. Keep it private and delete it when you're done.</p>
         </div>
       </details>
       <details id="guideExplore">
@@ -322,7 +338,7 @@
       <button id="connect" class="primary">Connect Gmail</button>
       <div id="connectedLabel" aria-live="polite">Connected</div>
       <div id="startNotice" hidden>
-        <p>The first scan can take hours, and what it finds is stored only on this device and browser — not synced anywhere else. Pick the device you want to use for cleanup before you start.</p>
+        <p>The first scan can take hours, and what it finds is stored on this device and browser. When it's done you can copy it to another device (Data tab, Copy to another device), so scan on whichever device you can leave running.</p>
         <button id="noticeDismiss">Got it</button>
       </div>
       <button id="dataAction" disabled>Scan Gmail</button>
@@ -331,6 +347,14 @@
       <div class="bar" id="progressBar" hidden><div id="fill"></div></div>
       <p id="counts" hidden></p>
       <p id="lastSynced" class="hint" hidden></p>
+      <details id="copyDevice">
+        <summary><span>Copy to another device</span><span class="chev" aria-hidden="true"></span></summary>
+        <p class="hint">Copy your saved scan to another device or browser, so you can carry on cleaning up there without scanning again. Sign in with the same Google account there.</p>
+        <button id="exportCache">Export saved scan</button>
+        <button id="restoreCache">Restore from file</button>
+        <button id="copyHelp" class="linklike">How this works</button>
+        <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+      </details>
     </div>
   </section>
   <section id="exploreTab" class="tab" aria-labelledby="exploreHeading">
@@ -521,6 +545,19 @@ async function run(store, mode, fn) {
     t.onerror = () => rej(t.error);
   });
 }
+async function runMulti(stores, mode, fn) {
+  const db = await dbp;
+  return new Promise((res, rej) => {
+    const t = db.transaction(stores, mode);
+    const byName = {};
+    stores.forEach(name => { byName[name] = t.objectStore(name); });
+    let out;
+    try { out = fn(byName); } catch (e) { rej(e); return; }
+    t.oncomplete = () => res(out);
+    t.onerror = () => rej(t.error);
+    t.onabort = () => rej(t.error || new Error('Transaction aborted'));
+  });
+}
 const getMeta = k => run('meta', 'readonly', s => s.get(k));
 const setMeta = (k, v) => run('meta', 'readwrite', s => { s.put(v, k); });
 const countMsgs = () => run('msgs', 'readonly', s => s.count());
@@ -695,10 +732,12 @@ async function scan(opts = {}) {
   updateStatusVisibility();
   keepAwake(true);
   $('dataAction').disabled = true; $('pause').disabled = false;
+  let completed = false;
   try {
     const prof = await api('/profile');
     total = prof.messagesTotal;
     const startHist = prof.historyId; // changes after this point are caught by the next sync
+    await setMeta('account', (prof.emailAddress || '').toLowerCase());
     if (opts.fresh) await setMeta('scan', {});
     const meta = (await getMeta('scan')) || {};
     let page = opts.fresh ? undefined : meta.pageToken;
@@ -750,6 +789,7 @@ async function scan(opts = {}) {
         const note = fullPass ? await finishFullPass(live, startHist) : '';
         const bad = await countBad();
         say('Scan complete.' + note + (bad ? ` Gmail wouldn't return ${bad} message${bad > 1 ? 's' : ''}, so they were skipped.` : '') + ' Run it again anytime to pick up new mail.');
+        completed = true;
         break;
       }
     }
@@ -764,6 +804,7 @@ async function scan(opts = {}) {
   updateStatusVisibility();
   if (activeTab === 'review') await refreshReview();
   await updateDataAction();
+  return completed;
 }
 
 /* ---------- Sync with Gmail ---------- */
@@ -863,11 +904,14 @@ async function syncHistory(startId) {
   return { added: added.length, removed: removed.length, relabelled: dirty.size };
 }
 
+// Returns whether the sync completed: true only when the history sync finished or the full-check
+// fallback (scan) ran all the way through. Pausing, an expired session or any error counts as false.
 async function sync() {
-  if (running || syncing) return;
-  if (!token) { say('Tap Connect Gmail first.', true); return; }
+  if (running || syncing) return false;
+  if (!token) { say('Tap Connect Gmail first.', true); return false; }
   syncing = true; resumeFn = sync; updateStatusVisibility();
   $('dataAction').disabled = true;
+  let completed = false;
   try {
     const h = await getMeta('history');
     if (h && h.id) {
@@ -875,14 +919,15 @@ async function sync() {
       try {
         const r = await syncHistory(h.id);
         say(`Synced. ${msgs(r.added)} new, ${r.removed} removed, labels changed on ${msgs(r.relabelled)}.`);
-        return;
+        completed = true;
+        return completed;
       } catch (e) {
         if (e.status !== 404) throw e;
         say('Gmail no longer keeps change history that far back. Doing a full check instead…');
       }
     } else say('First sync: comparing everything with Gmail. This takes a few minutes…');
     syncing = false;
-    await scan({ fresh: true });
+    completed = await scan({ fresh: true });
   } catch (e) {
     if (e.message === 'expired') needReconnect();
     else say('Sync stopped: ' + e.message, true);
@@ -892,6 +937,167 @@ async function sync() {
     updateStatusVisibility();
     if (activeTab === 'review') await refreshReview(); // keep the open review tab current
     await updateDataAction();
+  }
+  return completed;
+}
+
+/* ---------- Copy to another device: export and restore ---------- */
+// A plain JSON copy of the msgs store plus the meta.history/scan/account entries, so a scan
+// done on one device can be carried to another without repeating it. See CLAUDE.md for the
+// safety rules this follows: same-account only, replace-only restore, export syncs first.
+const CACHE_FORMAT = 'mail-sweeper-cache';
+async function getAccountEmail() {
+  const prof = await api('/profile');
+  return (prof.emailAddress || '').toLowerCase();
+}
+function exportFileName(d = new Date()) {
+  const p = n => String(n).padStart(2, '0');
+  return `mail-sweeper-cache-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}.json`;
+}
+async function exportCache() {
+  if (running || syncing) { toast('Wait for the current scan or sync to finish, then try Export again.', { alert: true }); return; }
+  const count = await countMsgs();
+  if (!count) { toast('Nothing to export yet.', { alert: true }); return; }
+  const stripLog = await getMeta('stripLog');
+  if (stripLog && Object.keys(stripLog).length) { toast('A strip run was interrupted. Finish or resume it first, then export.', { alert: true }); return; }
+  if (!token) { toast('Connect Gmail first. Export brings your scan up to date with Gmail before saving it.', { alert: true }); return; }
+
+  $('exportCache').disabled = true; $('restoreCache').disabled = true;
+  try {
+    let email;
+    try { email = await getAccountEmail(); }
+    catch (e) {
+      if (e.message === 'expired') { expireForAction(); return; }
+      toast('Could not check your Google account: ' + e.message, { alert: true }); return;
+    }
+    const stored = await getMeta('account');
+    if (stored && stored !== email) { toast('This saved scan was made with a different Google account than the one you’re connected with now.', { alert: true }); return; }
+    if (!stored) await setMeta('account', email);
+
+    const scanMeta = (await getMeta('scan')) || {};
+    const history = await getMeta('history');
+    const shouldSync = !!(history && history.id && !scanMeta.pageToken);
+    if (shouldSync) {
+      const completed = await sync();
+      if (!completed) { toast("Sync didn't finish, so nothing was exported. Try again.", { alert: true }); return; }
+    }
+
+    const rows = await run('msgs', 'readonly', st => st.getAll());
+    const finalScanMeta = (await getMeta('scan')) || {};
+    const finalHistory = await getMeta('history');
+    const payload = {
+      format: CACHE_FORMAT, version: 1,
+      exportedAt: Date.now(), account: email, count: rows.length,
+      history: (finalHistory && finalHistory.id) ? finalHistory : null,
+      scan: finalScanMeta.pageToken ? { pageToken: finalScanMeta.pageToken } : null,
+      rows
+    };
+    const name = exportFileName();
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+
+    const n = msgs(rows.length);
+    if (shouldSync) toast(`Synced with Gmail and exported ${n} as ${name}. Check your Downloads folder, and keep the file private.`, { sticky: true });
+    else if (scanMeta.pageToken) toast(`Exported ${n} as ${name}. The scan isn't finished, so Resume scan will carry on from here on the other device. Check your Downloads folder, and keep the file private.`, { sticky: true });
+    else toast(`Exported ${n} as ${name}. Check your Downloads folder, and keep the file private.`, { sticky: true });
+  } finally {
+    await updateDataAction();
+  }
+}
+function validCacheRow(r) {
+  return !!r && typeof r === 'object' && typeof r.id === 'string' && typeof r.from === 'string' &&
+    Number.isFinite(r.date) && Number.isFinite(r.size) &&
+    Array.isArray(r.labels) && r.labels.every(l => typeof l === 'string');
+}
+function validateCachePayload(payload) {
+  if (!payload || typeof payload !== 'object' || payload.format !== CACHE_FORMAT) return 'That file is not a Mail Sweeper saved-scan file.';
+  if (typeof payload.version !== 'number' || payload.version > 1) return 'This file was made by a newer version of the app. Refresh the app and try again.';
+  if (!Array.isArray(payload.rows) || payload.count !== payload.rows.length) return 'That saved-scan file looks damaged (the message count does not match).';
+  if (!payload.rows.every(validCacheRow)) return 'That saved-scan file looks damaged (a message entry is invalid).';
+  if (typeof payload.account !== 'string' || !payload.account) return 'That saved-scan file looks damaged (missing account).';
+  if (payload.history != null && !(typeof payload.history.id === 'string' && Number.isFinite(payload.history.at))) return 'That saved-scan file looks damaged (bad history data).';
+  if (payload.scan != null && typeof payload.scan.pageToken !== 'string') return 'That saved-scan file looks damaged (bad scan data).';
+  return null;
+}
+function restoreConfirmText(payload, existingCount) {
+  const when = new Date(payload.exportedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  const n = payload.rows.length.toLocaleString();
+  if (payload.scan) {
+    let t = `Restore the unfinished scan from ${when} (${n} messages)?`;
+    if (existingCount) t += ` It will replace the ${existingCount.toLocaleString()} messages saved on this device.`;
+    return t + ' Tap Resume scan afterwards to carry on.';
+  }
+  if (existingCount) return `Restore the scan from ${when} (${n} messages)? It will replace the ${existingCount.toLocaleString()} messages saved on this device, then sync with Gmail to catch up.`;
+  return `Restore the scan from ${when} (${n} messages)? It will then sync with Gmail to catch up.`;
+}
+function readFileText(file) {
+  if (file.text) return file.text();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Could not read file'));
+    reader.readAsText(file);
+  });
+}
+function openRestoreFile() {
+  if (running || syncing) { toast('Wait for the current scan or sync to finish, then try Restore again.', { alert: true }); return; }
+  if (!token) { toast('Connect Gmail first, so the app can check the file belongs to this account.', { alert: true }); return; }
+  $('restoreFile').value = '';
+  $('restoreFile').click();
+}
+async function handleRestoreFile(file) {
+  if (!file) return;
+  let payload;
+  try { payload = JSON.parse(await readFileText(file)); }
+  catch (e) { toast('Could not read that file as a saved-scan file.', { alert: true }); return; }
+  const problem = validateCachePayload(payload);
+  if (problem) { toast(problem, { alert: true }); return; }
+
+  $('exportCache').disabled = true; $('restoreCache').disabled = true;
+  try {
+    let email;
+    try { email = await getAccountEmail(); }
+    catch (e) {
+      if (e.message === 'expired') { expireForAction(); return; }
+      toast('Could not check your Google account: ' + e.message, { alert: true }); return;
+    }
+    if (email !== payload.account) { toast("This file is from a different Google account than the one you're signed in with.", { alert: true }); return; }
+
+    const existingCount = await countMsgs();
+    const ok = confirm(restoreConfirmText(payload, existingCount));
+    if (!ok) { toast('Cancelled. Nothing was changed.'); return; }
+
+    try {
+      await runMulti(['msgs', 'meta'], 'readwrite', stores => {
+        stores.msgs.clear();
+        payload.rows.forEach(r => stores.msgs.put(r));
+        if (payload.history) stores.meta.put(payload.history, 'history'); else stores.meta.delete('history');
+        if (payload.scan) stores.meta.put(payload.scan, 'scan'); else stores.meta.delete('scan');
+        stores.meta.put(payload.account, 'account');
+        stores.meta.delete('attachIds');
+      });
+    } catch (e) { toast('Restore failed, so nothing was changed: ' + e.message, { alert: true }); return; }
+
+    selected = new Set(); reviewRows = []; matchRows = []; subjectCache = new Map(); attachSet = null;
+    done = await countMsgs();
+    if (activeTab === 'review') await refreshReview();
+    updateStatusVisibility();
+
+    const n = payload.rows.length.toLocaleString();
+    if (payload.scan) {
+      toast(`Restored ${n} messages. The scan wasn't finished, so tap Resume scan to carry on.`, { sticky: true });
+    } else if (payload.history) {
+      const completed = await sync();
+      toast(completed ? `Restored ${n} messages and synced with Gmail.` : `Restored ${n} messages, but the sync didn't finish. Tap Sync with Gmail to retry.`, { alert: !completed, sticky: completed });
+    } else {
+      toast(`Restored ${n} messages.`, { sticky: true });
+    }
+  } finally {
+    await updateDataAction(true);
   }
 }
 
@@ -2078,6 +2284,8 @@ async function updateDataAction(setStatus) {
   $('dataAction').textContent=meta.pageToken?'Resume scan':history&&history.id?'Sync with Gmail':'Scan Gmail';
   $('dataAction').disabled=!token||running||syncing;
   $('pause').disabled=!running;
+  $('exportCache').disabled=!token||running||syncing;
+  $('restoreCache').disabled=!token||running||syncing;
   $('connect').classList.toggle('connected',!!token); $('connectedLabel').classList.toggle('visible',!!token);
   updateConnIndicator();
   $('startNotice').hidden = !!(await getMeta('noticeDismissed')) || !!meta.pageToken || count>0;
@@ -2223,6 +2431,10 @@ document.querySelectorAll('#guideList details').forEach(d => d.addEventListener(
   if (d.open) document.querySelectorAll('#guideList details').forEach(o => { if (o !== d) o.open = false; }); // one section open at a time
 }));
 $('noticeDismiss').onclick = async () => { await setMeta('noticeDismissed', true); $('startNotice').hidden = true; };
+$('exportCache').onclick = exportCache;
+$('restoreCache').onclick = openRestoreFile;
+$('restoreFile').onchange = () => { handleRestoreFile($('restoreFile').files[0]); };
+$('copyHelp').onclick = () => openGuide('guideCopy');
 $('stripExplainerContinue').onclick = stripExplainerContinueFn;
 $('stripExplainerCancel').onclick = stripExplainerCancelFn;
 $('stripExplainerLink').onclick = () => { $('stripExplainer').hidden = true; openGuide('guideStrip'); };
