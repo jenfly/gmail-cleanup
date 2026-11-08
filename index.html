@@ -137,6 +137,12 @@
   #results li.sectionHeader { cursor:default; display:block; padding:18px 2px 6px; border-bottom:2px solid var(--ink); font-weight:700; }
   #results li.disabled { cursor:default; opacity:.65; }
   @media (max-width:390px) { .segmented button { font-size:.8rem; } #pagination { grid-template-columns:1fr auto 1fr; gap:4px; } #pagination button { font-size:.85rem; } }
+  @media (min-width:768px) {
+    #tabs { top:56px; bottom:auto; display:flex; justify-content:center; gap:4px; padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left)); border-top:none; border-bottom:1px solid var(--line); }
+    #tabs button { flex:none; min-height:44px; padding:10px 22px; background:none; border-radius:0; border-bottom:3px solid transparent; }
+    #tabs button[aria-current="page"] { background:none; color:var(--ink); font-weight:700; border-bottom-color:var(--accent); }
+    main { padding-top:112px; padding-bottom:40px; }
+  }
 </style>
 </head>
 <body>
