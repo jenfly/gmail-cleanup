@@ -353,7 +353,7 @@
         <button id="exportCache">Export saved scan</button>
         <button id="restoreCache">Restore from file</button>
         <button id="copyHelp" class="linklike">How this works</button>
-        <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+        <input type="file" id="restoreFile" accept=".json,.gz,application/json,application/gzip" hidden>
       </details>
     </div>
   </section>
@@ -950,9 +950,18 @@ async function getAccountEmail() {
   const prof = await api('/profile');
   return (prof.emailAddress || '').toLowerCase();
 }
-function exportFileName(d = new Date()) {
+function exportFileName(ext, d = new Date()) {
   const p = n => String(n).padStart(2, '0');
-  return `mail-sweeper-cache-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}.json`;
+  return `mail-sweeper-cache-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}.${ext}`;
+}
+async function packCache(payload) {
+  const json = JSON.stringify(payload);
+  if (typeof CompressionStream === 'function') {
+    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+    const blob = await new Response(stream, { headers: { 'Content-Type': 'application/gzip' } }).blob();
+    return { blob, name: exportFileName('json.gz') };
+  }
+  return { blob: new Blob([json], { type: 'application/json' }), name: exportFileName('json') };
 }
 async function exportCache() {
   if (running || syncing) { toast('Wait for the current scan or sync to finish, then try Export again.', { alert: true }); return; }
@@ -992,8 +1001,9 @@ async function exportCache() {
       scan: finalScanMeta.pageToken ? { pageToken: finalScanMeta.pageToken } : null,
       rows
     };
-    const name = exportFileName();
-    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    let blob, name;
+    try { ({ blob, name } = await packCache(payload)); }
+    catch (e) { toast('Could not compress the file, so nothing was exported.', { alert: true }); return; }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = name;
@@ -1034,14 +1044,25 @@ function restoreConfirmText(payload, existingCount) {
   if (existingCount) return `Restore the scan from ${when} (${n} messages)? It will replace the ${existingCount.toLocaleString()} messages saved on this device, then sync with Gmail to catch up.`;
   return `Restore the scan from ${when} (${n} messages)? It will then sync with Gmail to catch up.`;
 }
-function readFileText(file) {
-  if (file.text) return file.text();
+function readFileBytes(file) {
+  if (file.arrayBuffer) return file.arrayBuffer();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(reader.error || new Error('Could not read file'));
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   });
+}
+async function cacheTextFromBytes(buf) {
+  const bytes = new Uint8Array(buf);
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    if (typeof DecompressionStream !== 'function') throw new Error('nodecompress');
+    try {
+      const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+      return await new Response(stream).text();
+    } catch (e) { throw new Error('damaged'); }
+  }
+  return new TextDecoder().decode(buf);
 }
 function openRestoreFile() {
   if (running || syncing) { toast('Wait for the current scan or sync to finish, then try Restore again.', { alert: true }); return; }
@@ -1052,8 +1073,14 @@ function openRestoreFile() {
 async function handleRestoreFile(file) {
   if (!file) return;
   let payload;
-  try { payload = JSON.parse(await readFileText(file)); }
-  catch (e) { toast('Could not read that file as a saved-scan file.', { alert: true }); return; }
+  try {
+    const text = await cacheTextFromBytes(await readFileBytes(file));
+    payload = JSON.parse(text);
+  } catch (e) {
+    if (e.message === 'nodecompress') { toast("This file is compressed, and this browser can't open it. Update your browser and try again.", { alert: true }); return; }
+    if (e.message === 'damaged') { toast('That saved-scan file looks damaged (it could not be unzipped).', { alert: true }); return; }
+    toast('Could not read that file as a saved-scan file.', { alert: true }); return;
+  }
   const problem = validateCachePayload(payload);
   if (problem) { toast(problem, { alert: true }); return; }
 

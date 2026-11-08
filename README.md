@@ -103,9 +103,9 @@ The access token lasts about an hour. If a scan or sync pauses and the header sh
 
 The scan lives only in the browser that ran it. To clean up from a second device (or back up the scan before clearing site data or uninstalling the app), use **Copy to another device** on the Data tab:
 
-1. On the device with the scan, tap **Export saved scan**. This syncs with Gmail first, then downloads a JSON file (`mail-sweeper-cache-YYYY-MM-DD.json`) to your Downloads folder. It lists sender addresses, dates and sizes for your whole mailbox, so keep it private.
+1. On the device with the scan, tap **Export saved scan**. This syncs with Gmail first, then downloads a compressed file (`mail-sweeper-cache-YYYY-MM-DD.json.gz`) to your Downloads folder. It lists sender addresses, dates and sizes for your whole mailbox, so keep it private.
 2. Move that file to the other device (email it to yourself, a cloud drive, a USB stick — whatever's easiest).
-3. On the other device, sign in with **the same Google account**, then tap **Restore from file** and pick the file. This replaces whatever scan was already saved there, then syncs with Gmail automatically.
+3. On the other device, sign in with **the same Google account**, then tap **Restore from file** and pick the file. This replaces whatever scan was already saved there, then syncs with Gmail automatically. Restore also accepts the plain `.json` files made by earlier versions of the app.
 
 Each device then syncs independently from then on; a change made on one shows up on the other at its next Sync. Undo (trash and strip) only covers what was done on that specific device, since each copy has its own history. Restoring a file more than about a week old can trigger a slower full sync on the first run, same as reopening the app after a long gap.
 
