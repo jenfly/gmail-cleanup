@@ -155,6 +155,7 @@
   #copyDevice #exportCache,#copyDevice #restoreCache { display:block; width:100%; }
   #copyDevice #restoreCache { margin-top:8px; }
   #copyDevice #copyHelp { margin-top:6px; }
+  #copyConnectHint[hidden] { display:none; }
   #guideOverlay { position:fixed; z-index:9; inset:0; background:var(--bg); display:flex; flex-direction:column; }
   #guideOverlay[hidden] { display:none; }
   #guideTop { flex:none; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:max(10px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left)); border-bottom:1px solid var(--line); }
@@ -351,8 +352,9 @@
       <details id="copyDevice">
         <summary><span>Copy to another device</span><span class="chev" aria-hidden="true"></span></summary>
         <p class="hint">Copy your saved scan to another device or browser, so you can carry on cleaning up there without scanning again. Sign in with the same Google account there.</p>
-        <button id="exportCache">Export saved scan</button>
-        <button id="restoreCache">Restore from file</button>
+        <button id="exportCache" aria-describedby="copyConnectHint">Export saved scan</button>
+        <button id="restoreCache" aria-describedby="copyConnectHint">Restore from file</button>
+        <p id="copyConnectHint" class="hint" hidden><button id="copyConnectBtn" class="linklike">Connect Gmail</button> first. Export and Restore both sync with Gmail.</p>
         <button id="copyHelp" class="linklike">How this works</button>
         <input type="file" id="restoreFile" accept=".json,.gz,application/json,application/gzip" hidden>
       </details>
@@ -2314,6 +2316,7 @@ async function updateDataAction(setStatus) {
   $('pause').disabled=!running;
   $('exportCache').disabled=!token||running||syncing;
   $('restoreCache').disabled=!token||running||syncing;
+  $('copyConnectHint').hidden=!!token;
   $('connect').classList.toggle('connected',!!token); $('connectedLabel').classList.toggle('visible',!!token);
   updateConnIndicator();
   $('startNotice').hidden = !!(await getMeta('noticeDismissed')) || !!meta.pageToken || count>0;
@@ -2408,6 +2411,7 @@ history.replaceState({ tab: 'data' }, '', location.href);
 window.addEventListener('popstate', e => switchTab((e.state && e.state.tab) || 'data', { fromHistory: true }));
 $('connect').onclick = connect;
 $('reviewConnect').onclick = connect;
+$('copyConnectBtn').onclick = connect;
 $('dataAction').onclick = runDataAction;
 $('pause').onclick = () => { running = false; };
 $('tabData').onclick = () => switchTab('data');
