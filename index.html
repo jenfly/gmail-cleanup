@@ -749,7 +749,7 @@ let reviewVisited = false, reviewEntryFromExplore = false;
 let attachSet = null; // ids Gmail says have attachments (null until loaded)
 const PAGE_SIZE = 25;
 
-function switchTab(name) {
+function switchTab(name, { fromHistory = false } = {}) {
   const previous = activeTab;
   activeTab = name;
   document.body.dataset.tab = name;
@@ -770,6 +770,9 @@ function switchTab(name) {
   if (name === 'review') refreshReview();
   if (name === 'explore') renderExplore();
   if (name === 'data') updateDataAction();
+  // Give the phone's back gesture/button something to navigate within the app instead of
+  // closing it: each tab switch is a history entry, popped by the popstate handler below.
+  if (!fromHistory && name !== previous) history.pushState({ tab: name }, '', location.href);
 }
 function setExploreMode(mode) {
   exploreMode = mode;
@@ -1933,6 +1936,8 @@ async function openReview() { await refreshReview(); }
 
 
 document.body.dataset.tab='data';
+history.replaceState({ tab: 'data' }, '', location.href);
+window.addEventListener('popstate', e => switchTab((e.state && e.state.tab) || 'data', { fromHistory: true }));
 $('connect').onclick = connect;
 $('reviewConnect').onclick = connect;
 $('dataAction').onclick = runDataAction;
