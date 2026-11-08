@@ -96,7 +96,8 @@
   #moreMenu .menuRow span { flex:1; min-width:0; }
   #moreMenu .menuEmphasis { font-weight:650; }
   #moreMenu .menuDivider { border:0; border-top:1px solid var(--line); margin:10px 0; }
-  #moreMenu .menuLabelRow { display:flex; align-items:center; gap:8px; margin-top:8px; min-height:44px; }
+  #moreMenu .menuLabelRow { display:flex; align-items:center; gap:8px; min-height:44px; }
+  #moreMenu .menuLabelRow + .menuRow { margin-top:8px; }
   #moreMenu .menuLabelRow svg { flex:none; color:var(--muted); }
   #moreMenu .menuLabelRow input { flex:1; width:auto; min-width:0; margin-top:0; }
   #moreMenu .menuLabelRow button { width:auto; margin-top:0; flex:none; padding:10px 14px; }
@@ -408,15 +409,15 @@
         <button id="moreActions" aria-label="More actions" aria-expanded="false" aria-controls="moreMenu">⋯</button>
       </div>
       <div id="moreMenu" hidden>
-        <button id="stripSelectedBtn" class="menuRow menuEmphasis">
-          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -3 -3l-6.5 6.5a4.5 4.5 0 0 0 4.5 4.5" /></svg>
-          <span>Strip attachments</span>
-        </button>
         <div class="menuLabelRow">
           <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 7.5h-.01" /><path d="M3 10v-4a2 2 0 0 1 2 -2h4.5c.313 0 .613 .125 .834 .346l9 9a1.2 1.2 0 0 1 0 1.708l-7.5 7.5a1.2 1.2 0 0 1 -1.708 0l-9 -9c-.221 -.221 -.346 -.521 -.346 -.834z" /></svg>
           <input id="fLabel" type="text" value="Sweeper review" aria-label="Label name">
           <button id="applyLabel" class="menuEmphasis">Apply</button>
         </div>
+        <button id="stripSelectedBtn" class="menuRow menuEmphasis">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 7.5l5.5 -5.5a3.536 3.536 0 1 1 5 5l-10 10a5 5 0 0 1 -7 -7l7.5 -7.5" /></svg>
+          <span>Strip attachments</span>
+        </button>
         <hr class="menuDivider">
         <div class="menuUndoRow">
           <button id="undoTrash" class="menuRow menuQuiet">
