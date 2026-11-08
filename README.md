@@ -86,7 +86,7 @@ Mail Sweeper has a built-in help guide (tap the **?** in the header) that walks 
 Tap the **?** in the header any time for the full in-app guide.
 
 1. **Connect Gmail** and approve access.
-2. **Scan Gmail.** The first scan can take hours, and what it finds is stored only on this device and browser — it won't show up if you open the app elsewhere. A notice above the Scan button covers this until you dismiss it (it also goes away on its own once a scan starts). Progress is saved as it goes, so you can **Pause** or close the tab and resume later with **Resume scan**.
+2. **Scan Gmail.** The first scan can take hours, and what it finds is stored only on this device and browser. A notice above the Scan button covers this until you dismiss it (it also goes away on its own once a scan starts). Progress is saved as it goes, so you can **Pause** or close the tab and resume later with **Resume scan**. Once it's done, you can copy the scan to another device instead of scanning again there — see "Copying a scan to another device" below.
 3. **Sync with Gmail** catches the app up after you delete, label or receive mail directly in Gmail. It asks Gmail what changed since the last sync, so it takes seconds instead of a full rescan. If it's been too long (Gmail keeps change history for roughly a week), it falls back to a quicker full check that only downloads details for new messages. Run it before you review or label anything.
 4. **Explore** shows where your storage is going: space by type and age, **Top senders** (the 25 senders using the most space), and biggest messages. Tapping a row opens **Review** with that filter applied.
 5. **Review** lists messages matching your filters (sender, size, age, Sent/Archived, Has attachments). Select the ones you want, then use the bar at the bottom:
@@ -98,6 +98,18 @@ Tap the **?** in the header any time for the full in-app guide.
 Emptying Gmail's Trash (to actually free the space) is a separate step you do in Gmail — this app never does it for you.
 
 The access token lasts about an hour. If a scan or sync pauses and the header shows "Reconnect needed," tap **Reconnect & resume** to carry on where you left off.
+
+## Copying a scan to another device
+
+The scan lives only in the browser that ran it. To clean up from a second device (or back up the scan before clearing site data or uninstalling the app), use **Copy to another device** on the Data tab:
+
+1. On the device with the scan, tap **Export saved scan**. This syncs with Gmail first, then downloads a JSON file (`mail-sweeper-cache-YYYY-MM-DD.json`) to your Downloads folder. It lists sender addresses, dates and sizes for your whole mailbox, so keep it private.
+2. Move that file to the other device (email it to yourself, a cloud drive, a USB stick — whatever's easiest).
+3. On the other device, sign in with **the same Google account**, then tap **Restore from file** and pick the file. This replaces whatever scan was already saved there, then syncs with Gmail automatically.
+
+Each device then syncs independently from then on; a change made on one shows up on the other at its next Sync. Undo (trash and strip) only covers what was done on that specific device, since each copy has its own history. Restoring a file more than about a week old can trigger a slower full sync on the first run, same as reopening the app after a long gap.
+
+Nothing is uploaded anywhere — the file is created on your device and goes only where you put it.
 
 ## Troubleshooting
 
