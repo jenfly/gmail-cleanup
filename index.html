@@ -152,10 +152,27 @@
   #guideTop h2 { margin:0; }
   #guideClose { flex:none; width:44px; height:44px; min-height:44px; padding:0; border-radius:50%; display:flex; align-items:center; justify-content:center; }
   #guideBody { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:16px max(16px,env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left)); max-width:680px; margin:0 auto; width:100%; }
-  #guideBody section { margin:0 0 22px; scroll-margin-top:10px; }
-  #guideBody section:last-child { margin-bottom:0; }
-  #guideBody h3 { margin:0 0 6px; font-size:1rem; }
+  #guideBody section { scroll-margin-top:10px; }
+  #guideBody h3 { margin:0; font-size:1rem; }
   #guideBody p { margin:0 0 8px; }
+  #guideQuick { background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px; margin:0 0 22px; }
+  #guideQuick h3 { font-size:1.1rem; line-height:1.3; }
+  #guideQuick .hint { margin:2px 0 14px; font-size:.875rem; }
+  #guideSteps { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:12px; }
+  #guideSteps li { display:flex; gap:12px; align-items:flex-start; }
+  #guideSteps .num { flex:none; width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; font-size:.875rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
+  #guideSteps strong { display:block; font-size:.94rem; line-height:1.3; }
+  #guideSteps .what { display:block; font-size:.875rem; line-height:1.4; color:var(--muted); }
+  #guideGotIt { width:100%; margin-top:16px; border-color:var(--accent); background:var(--accent); color:#fff; font-weight:650; }
+  #guideBody .guideMore { margin:0 4px 8px; font-size:.8rem; font-weight:650; color:var(--muted); letter-spacing:.04em; text-transform:uppercase; }
+  #guideList { display:flex; flex-direction:column; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+  #guideList details { background:#fff; scroll-margin-top:10px; }
+  #guideList summary { min-height:52px; padding:8px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; font-weight:600; cursor:pointer; list-style:none; }
+  #guideList summary::-webkit-details-marker { display:none; }
+  #guideList summary svg { flex:none; color:var(--muted); }
+  #guideList details[open] summary svg { transform:rotate(180deg); }
+  #guideList summary:focus-visible { outline:3px solid var(--accent); outline-offset:-3px; }
+  .guideDetail { padding:0 16px 8px; font-size:.94rem; }
   #stripExplainer { position:fixed; z-index:10; inset:0; background:#14232bcc; display:flex; align-items:center; justify-content:center; padding:16px; }
   #stripExplainer[hidden] { display:none; }
   #stripExplainerCard { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:18px; max-width:440px; width:100%; max-height:85vh; overflow-y:auto; }
@@ -188,51 +205,84 @@
     </button>
   </div>
   <div id="guideBody">
-    <section id="guideStart">
-      <h3>Before you start: pick your device</h3>
-      <p>The first scan can take hours, because Gmail limits how fast it lets any app read your mail. What gets scanned is stored only on this device, in this browser — it doesn't sync between devices. Decide which device you'll do your cleanup on before you start scanning.</p>
-      <p>Clearing this browser's site data, or uninstalling the home-screen app, wipes that cache and means doing the scan again from scratch — so don't do that casually.</p>
+    <section id="guideQuick">
+      <h3>Quick start</h3>
+      <p class="hint">Five steps to your first cleanup.</p>
+      <ol id="guideSteps">
+        <li><span class="num" aria-hidden="true">1</span><div><strong>Pick your device first</strong><span class="what">The scan is stored only in this browser and can’t move to another device. Decide where you’ll clean up before you start. Clearing site data or uninstalling the app means scanning again.</span></div></li>
+        <li><span class="num" aria-hidden="true">2</span><div><strong>Sign in with Google</strong><span class="what">Google shows an “unverified app” warning. That’s expected: tap Advanced, then Go to Mail Sweeper (unsafe).</span></div></li>
+        <li><span class="num" aria-hidden="true">3</span><div><strong>Scan your mail</strong><span class="what">It may take hours. Keep the screen on while it runs; you can pause and resume any time.</span></div></li>
+        <li><span class="num" aria-hidden="true">4</span><div><strong>Explore, then Review</strong><span class="what">See where the space goes, tap a row, then select messages and move them to Trash.</span></div></li>
+        <li><span class="num" aria-hidden="true">5</span><div><strong>Empty Trash in Gmail</strong><span class="what">This is what actually frees space. Mail Sweeper never does it for you.</span></div></li>
+      </ol>
+      <button id="guideGotIt">Got it</button>
     </section>
-    <section id="guidePrivacy">
-      <h3>Privacy</h3>
-      <p>Everything runs in your own browser. Nothing is sent anywhere except to Google's Gmail API, to read and manage your mail. Jennifer can't see your mail, even though she manages who's allowed to sign in.</p>
-    </section>
-    <section id="guideSignin">
-      <h3>First sign-in</h3>
-      <p>Google will show an "unverified app" warning, because this app is in Testing mode. Tap Advanced, then Go to Mail Sweeper (unsafe), then grant access — this is expected.</p>
-      <p>If you see an access denied error, message Jennifer: your Gmail address needs to be added to the test user list.</p>
-      <p>Google also signs Testing-mode apps out after about a week, so you may need to reconnect occasionally. A paused scan always resumes right where it left off.</p>
-    </section>
-    <section id="guideScan">
-      <h3>Scan</h3>
-      <p>Scanning reads basic information about each message — sender, date, size, labels — so the app can show you where your storage is going. Progress is saved as it goes, so you can pause, or close the app, and pick up right where you left off.</p>
-      <p>Gmail throttles hard, so for best results keep the screen on and the app open while a scan runs.</p>
-    </section>
-    <section id="guideSync">
-      <h3>Sync</h3>
-      <p>Sync catches the app up on anything that changed directly in Gmail — new mail, deletions, labels — since the last time. It only takes a few seconds. Run it before reviewing or labelling anything.</p>
-    </section>
-    <section id="guideExplore">
-      <h3>Explore</h3>
-      <p>Explore shows where your storage is going: by type, by age, by size, your biggest senders, and your biggest individual messages. Tap any row to open Review with that filter already applied.</p>
-    </section>
-    <section id="guideReview">
-      <h3>Review</h3>
-      <p>Review lists messages matching whatever filters you've set, so you can select some and act on them: move them to Trash, apply a label, or strip attachments (see below). Starred messages and anything already in Trash are never included, even if selected.</p>
-      <p>The ⋯ menu also has Undo trash and Undo strip, for the most recent run of each.</p>
-    </section>
-    <section id="guideStrip">
-      <h3>Strip attachments</h3>
-      <p>Gmail can't edit a message in place. So for each selected message with a large attachment (50 KB or more), the app saves the attachments as a zip file on your device, inserts a new copy of the message without them (same headers, thread and labels, plus a short note), then moves the original to Trash.</p>
-      <p>Inline images and smaller attachments are left alone. Messages with no large attachment are skipped.</p>
-      <p>The zip on your device becomes the only copy of those attachments — keep it somewhere safe.</p>
-      <p>Space isn't freed until the original is gone from Trash — see "Emptying Trash" below.</p>
-      <p>Undo strip (in the ⋯ menu) reverses the most recent strip run.</p>
-    </section>
-    <section id="guideEmptyTrash">
-      <h3>Emptying Trash</h3>
-      <p>None of this frees space in your Google account until Trash is emptied. Mail Sweeper deliberately never empties Trash for you — do that yourself, in Gmail, when you're ready.</p>
-    </section>
+    <h3 class="guideMore">More detail</h3>
+    <div id="guideList">
+      <details id="guideStart">
+        <summary><span>Before you start: pick your device</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>The first scan can take hours, because Gmail limits how fast it lets any app read your mail. What gets scanned is stored only on this device, in this browser — it doesn't sync between devices. Decide which device you'll do your cleanup on before you start scanning.</p>
+          <p>Clearing this browser's site data, or uninstalling the home-screen app, wipes that cache and means doing the scan again from scratch — so don't do that casually.</p>
+        </div>
+      </details>
+      <details id="guidePrivacy">
+        <summary><span>Privacy</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Everything runs in your own browser. Nothing is sent anywhere except to Google's Gmail API, to read and manage your mail. Jennifer can't see your mail, even though she manages who's allowed to sign in.</p>
+        </div>
+      </details>
+      <details id="guideSignin">
+        <summary><span>First sign-in</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Google will show an "unverified app" warning, because this app is in Testing mode. Tap Advanced, then Go to Mail Sweeper (unsafe), then grant access — this is expected.</p>
+          <p>If you see an access denied error, message Jennifer: your Gmail address needs to be added to the test user list.</p>
+          <p>Google also signs Testing-mode apps out after about a week, so you may need to reconnect occasionally. A paused scan always resumes right where it left off.</p>
+        </div>
+      </details>
+      <details id="guideScan">
+        <summary><span>Scan</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Scanning reads basic information about each message — sender, date, size, labels — so the app can show you where your storage is going. Progress is saved as it goes, so you can pause, or close the app, and pick up right where you left off.</p>
+          <p>Gmail throttles hard, so for best results keep the screen on and the app open while a scan runs.</p>
+        </div>
+      </details>
+      <details id="guideSync">
+        <summary><span>Sync</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Sync catches the app up on anything that changed directly in Gmail — new mail, deletions, labels — since the last time. It only takes a few seconds. Run it before reviewing or labelling anything.</p>
+        </div>
+      </details>
+      <details id="guideExplore">
+        <summary><span>Explore</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Explore shows where your storage is going: by type, by age, by size, your biggest senders, and your biggest individual messages. Tap any row to open Review with that filter already applied.</p>
+        </div>
+      </details>
+      <details id="guideReview">
+        <summary><span>Review</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Review lists messages matching whatever filters you've set, so you can select some and act on them: move them to Trash, apply a label, or strip attachments (see below). Starred messages and anything already in Trash are never included, even if selected.</p>
+          <p>The ⋯ menu also has Undo trash and Undo strip, for the most recent run of each.</p>
+        </div>
+      </details>
+      <details id="guideStrip">
+        <summary><span>Strip attachments</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Gmail can't edit a message in place. So for each selected message with a large attachment (50 KB or more), the app saves the attachments as a zip file on your device, inserts a new copy of the message without them (same headers, thread and labels, plus a short note), then moves the original to Trash.</p>
+          <p>Inline images and smaller attachments are left alone. Messages with no large attachment are skipped.</p>
+          <p>The zip on your device becomes the only copy of those attachments — keep it somewhere safe.</p>
+          <p>Space isn't freed until the original is gone from Trash — see "Emptying Trash" below.</p>
+          <p>Undo strip (in the ⋯ menu) reverses the most recent strip run.</p>
+        </div>
+      </details>
+      <details id="guideEmptyTrash">
+        <summary><span>Emptying Trash</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>None of this frees space in your Google account until Trash is emptied. Mail Sweeper deliberately never empties Trash for you — do that yourself, in Gmail, when you're ready.</p>
+        </div>
+      </details>
+    </div>
   </div>
 </div>
 <div id="stripExplainer" hidden aria-label="About stripping attachments">
@@ -2039,11 +2089,21 @@ async function runDataAction() {
 async function openReview() { await refreshReview(); }
 
 /* ---------- Help guide ---------- */
+/* The "More detail" sections are <details> rows, collapsed each time the guide opens; openGuide(anchorId)
+   expands the one it scrolls to. Closing the guide any way (X, Got it) marks it seen (meta.guideSeen),
+   and it opens by itself only until then, so after the first close it only opens from the Help button. */
 function openGuide(anchorId) {
   $('guideOverlay').hidden = false;
-  if (anchorId) { const el = $(anchorId); if (el) el.scrollIntoView({ block: 'start' }); }
+  document.querySelectorAll('#guideList details').forEach(d => { d.open = false; });
+  const el = anchorId ? $(anchorId) : null;
+  if (el && el.tagName === 'DETAILS') el.open = true;
+  $('guideBody').scrollTop = 0;
+  if (el) el.scrollIntoView({ block: 'start' });
 }
-function closeGuide() { $('guideOverlay').hidden = true; }
+function closeGuide() {
+  $('guideOverlay').hidden = true;
+  setMeta('guideSeen', true).catch(() => {});
+}
 
 /* ---------- Strip attachments: first-use explainer ----------
    Shown once before stripSelected()'s own confirm(), the first time Strip attachments is
@@ -2118,6 +2178,10 @@ $('stripSelectedBtn').onclick = startStrip;
 $('undoStripBtn').onclick = undoStrip;
 $('helpBtn').onclick = () => openGuide();
 $('guideClose').onclick = closeGuide;
+$('guideGotIt').onclick = closeGuide;
+document.querySelectorAll('#guideList details').forEach(d => d.addEventListener('toggle', () => {
+  if (d.open) document.querySelectorAll('#guideList details').forEach(o => { if (o !== d) o.open = false; }); // one section open at a time
+}));
 $('noticeDismiss').onclick = async () => { await setMeta('noticeDismissed', true); $('startNotice').hidden = true; };
 $('stripExplainerContinue').onclick = stripExplainerContinueFn;
 $('stripExplainerCancel').onclick = stripExplainerCancelFn;
@@ -2129,6 +2193,7 @@ $('fAttach').addEventListener('change', async () => {
 });
 countMsgs().then(n => { done = n; });
 updateDataAction(true);
+getMeta('guideSeen').then(seen => { if (!seen) openGuide(); }).catch(() => {});
 </script>
 </body>
 </html>
