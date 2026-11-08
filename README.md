@@ -65,6 +65,8 @@ Then open <http://localhost:8000>.
 
 **iPhone (Safari):** open the deployed page, tap the Share icon, then **Add to Home Screen**. (Must be Safari — Chrome and other browsers on iOS can't install home-screen apps.)
 
+The in-app help guide has the same instructions under "Install on your phone", with an Install button where the browser supports it.
+
 Either way it opens full-screen like a regular app. The service worker loads the newest version whenever you're online, so updates appear after you push them.
 
 If you test locally, give each project its own port (for example `python3 -m http.server 8001`) and add that origin under Authorized JavaScript origins. Service workers are tied to the address, and a port previously used by another app can keep serving that app.

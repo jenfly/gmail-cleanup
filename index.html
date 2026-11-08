@@ -173,6 +173,8 @@
   #guideList details[open] summary svg { transform:rotate(180deg); }
   #guideList summary:focus-visible { outline:3px solid var(--accent); outline-offset:-3px; }
   .guideDetail { padding:0 16px 8px; font-size:.94rem; }
+  #installState { font-weight:600; }
+  #installBtn { width:100%; margin:4px 0 12px; border-color:var(--accent); background:var(--accent); color:#fff; font-weight:650; }
   #stripExplainer { position:fixed; z-index:10; inset:0; background:#14232bcc; display:flex; align-items:center; justify-content:center; padding:16px; }
   #stripExplainer[hidden] { display:none; }
   #stripExplainerCard { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:18px; max-width:440px; width:100%; max-height:85vh; overflow-y:auto; }
@@ -224,6 +226,17 @@
         <div class="guideDetail">
           <p>The first scan can take hours, because Gmail limits how fast it lets any app read your mail. What gets scanned is stored only on this device, in this browser — it doesn't sync between devices. Decide which device you'll do your cleanup on before you start scanning.</p>
           <p>Clearing this browser's site data, or uninstalling the home-screen app, wipes that cache and means doing the scan again from scratch — so don't do that casually.</p>
+        </div>
+      </details>
+      <details id="guideInstall">
+        <summary><span>Install on your phone</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
+        <div class="guideDetail">
+          <p>Installing puts Mail Sweeper on your home screen, so it opens full-screen like any other app.</p>
+          <p id="installState" hidden></p>
+          <button id="installBtn" class="primary" hidden>Install Mail Sweeper</button>
+          <p id="installHow">Android (Chrome): tap the three-dot menu, then Install app (or Add to Home screen). iPhone: open this page in Safari, tap the Share icon, then Add to Home Screen.</p>
+          <p id="installIos">On iPhone, install before your first scan. A home-screen app can keep its own storage, separate from Safari's, so a scan done in Safari may not show up in the installed app, and you'd have to start the scan again.</p>
+          <p>Once a scan is stored, don't uninstall the app or clear this browser's site data. See "Before you start" above.</p>
         </div>
       </details>
       <details id="guidePrivacy">
@@ -2105,6 +2118,31 @@ function closeGuide() {
   setMeta('guideSeen', true).catch(() => {});
 }
 
+/* ---------- Help guide: install ---------- */
+/* The "Install on your phone" row shows an Install button only while the browser is holding an install
+   prompt (Chrome on Android); otherwise it shows the manual steps. It never touches scan data. */
+let installPrompt = null, justInstalled = false;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function renderInstall() {
+  const inApp = isStandalone();
+  const msg = inApp ? "You're using the installed app." : justInstalled ? 'Installed. Open Mail Sweeper from your home screen.' : '';
+  const done = inApp || justInstalled;
+  $('installState').textContent = msg;
+  $('installState').hidden = !msg;
+  $('installBtn').hidden = done || !installPrompt;
+  $('installHow').hidden = done || !!installPrompt;
+  $('installIos').hidden = done;
+}
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; renderInstall(); });
+addEventListener('appinstalled', () => { installPrompt = null; justInstalled = true; renderInstall(); });
+async function installApp() {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  try { await installPrompt.userChoice; } catch (err) { /* ignore */ }
+  installPrompt = null;
+  renderInstall();
+}
+
 /* ---------- Strip attachments: first-use explainer ----------
    Shown once before stripSelected()'s own confirm(), the first time Strip attachments is
    used. Cancelling without ticking "Don't show this again" means it shows again next time;
@@ -2179,6 +2217,7 @@ $('undoStripBtn').onclick = undoStrip;
 $('helpBtn').onclick = () => openGuide();
 $('guideClose').onclick = closeGuide;
 $('guideGotIt').onclick = closeGuide;
+$('installBtn').onclick = installApp;
 document.querySelectorAll('#guideList details').forEach(d => d.addEventListener('toggle', () => {
   if (d.open) document.querySelectorAll('#guideList details').forEach(o => { if (o !== d) o.open = false; }); // one section open at a time
 }));
@@ -2193,6 +2232,7 @@ $('fAttach').addEventListener('change', async () => {
 });
 countMsgs().then(n => { done = n; });
 updateDataAction(true);
+renderInstall();
 getMeta('guideSeen').then(seen => { if (!seen) openGuide(); }).catch(() => {});
 </script>
 </body>
