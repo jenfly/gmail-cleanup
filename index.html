@@ -136,7 +136,7 @@
   #stripProgress li:last-child { border-bottom:none; }
   #stripProgress li.skipped { color:var(--muted); }
   #stripProgress li.failed { color:#8a2c2c; }
-  #stripProgress li button { width:auto; min-height:36px; padding:6px 10px; font-size:.85rem; margin-top:6px; }
+  #stripProgress li button { width:auto; min-height:36px; padding:6px 10px; font-size:.85rem; margin-top:6px; margin-left:8px; }
   #structureFallback[hidden] { display:none; }
   #structureFallback textarea { width:100%; min-height:40vh; font-family:monospace; font-size:.8rem; }
   #results li.sectionHeader { cursor:default; display:block; padding:18px 2px 6px; border-bottom:2px solid var(--ink); font-weight:700; }
@@ -1068,7 +1068,7 @@ async function undoTrash() {
 // Nothing in this section writes to Gmail. It reads one message (format=raw), works out which
 // attachments a strip would remove, and shows the result.
 const STRIP_MIN_BYTES = 50 * 1024; // attachments smaller than this are left in place
-const STRIP_NOTE_TEXT = 'Attachments were removed from this message to save space and saved elsewhere.';
+const STRIP_NOTE_TEXT = 'Attachments were removed from this message to save space.';
 const STRIP_NOTE_BYTES = 200 + STRIP_NOTE_TEXT.length; // rough size of the note part a stripped copy would carry
 const STRIP_UNSAFE = ['multipart/signed', 'multipart/encrypted', 'application/pkcs7-mime', 'application/x-pkcs7-mime', 'application/pgp-encrypted'];
 const STRIP_REVIEW_LABEL_NAME = 'Mail Sweeper review';
@@ -1335,7 +1335,7 @@ function renderStripPreview(m, r, a) {
       insertBtn.onclick = () => insertStrippedCopy();
     } else if (buildStrippedRaw(lastPreview.rawBin, a, { allowWrap: true })) {
       add('p', 'This message needs an extra step to strip safely — review the result carefully before trashing the original.', 'muted');
-      const wrapBtn = add('button', 'Build wrapped copy to check…');
+      const wrapBtn = add('button', 'Build a stripped copy');
       wrapBtn.onclick = () => insertStrippedCopy({ allowWrap: true });
     } else {
       add('p', 'Could not safely rebuild this message’s structure to strip it. Use Copy structure to see why.', 'summary');
