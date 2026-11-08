@@ -61,7 +61,11 @@ Then open <http://localhost:8000>.
 
 ## Install on your phone
 
-Open the deployed page in Chrome on Android, tap the three-dot menu, then **Install app** (or **Add to Home screen**). It opens full-screen like a regular app. The service worker loads the newest version whenever you're online, so updates appear after you push them.
+**Android (Chrome):** open the deployed page, tap the three-dot menu, then **Install app** (or **Add to Home screen**).
+
+**iPhone (Safari):** open the deployed page, tap the Share icon, then **Add to Home Screen**. (Must be Safari — Chrome and other browsers on iOS can't install home-screen apps.)
+
+Either way it opens full-screen like a regular app. The service worker loads the newest version whenever you're online, so updates appear after you push them.
 
 If you test locally, give each project its own port (for example `python3 -m http.server 8001`) and add that origin under Authorized JavaScript origins. Service workers are tied to the address, and a port previously used by another app can keep serving that app.
 
