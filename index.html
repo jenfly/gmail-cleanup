@@ -419,12 +419,6 @@
         <button id="nextPage" disabled>Next →</button>
       </nav>
     </div>
-    <div id="toast" hidden aria-live="polite">
-      <div id="toastInner">
-        <p id="toastText"></p>
-        <button id="toastClose" aria-label="Dismiss">✕</button>
-      </div>
-    </div>
     <div id="actions">
       <div id="actionInner">
         <button id="trashSelected" class="danger" disabled>
@@ -477,6 +471,12 @@
   <button id="tabExplore">Explore</button>
   <button id="tabReview">Review</button>
 </nav>
+<div id="toast" hidden aria-live="polite">
+  <div id="toastInner">
+    <p id="toastText"></p>
+    <button id="toastClose" aria-label="Dismiss">✕</button>
+  </div>
+</div>
 <script>
 const CLIENT_ID = '164588121644-fqbd137vllni6v951h5um974agbnrhs0.apps.googleusercontent.com';
 const SCOPE = 'https://www.googleapis.com/auth/gmail.modify';
@@ -494,7 +494,7 @@ const say = (t, alert = false) => {
   $('status').textContent = t;
   $('status').classList.toggle('alert', alert);
 };
-// One-off feedback for a Review-tab action (confirmation, error, or in-flight progress).
+// One-off feedback for an action on any tab (confirmation, error, or in-flight progress).
 // Never touches #status, so it can't leak onto another tab or resurface later.
 const TOAST_MS = 4000;
 let toastTimer = null;
