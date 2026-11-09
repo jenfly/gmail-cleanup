@@ -134,6 +134,7 @@
   #stripPreview p,#stripProgress p { margin:6px 0; overflow-wrap:anywhere; }
   #stripPreview ul { margin:4px 0 8px; padding-left:20px; overflow-wrap:anywhere; }
   #stripPreview button,#stripProgress button { width:100%; }
+  #stripPreview button.quiet { border-color:var(--line); color:var(--muted); }
   #stripProgress ul { list-style:none; margin:4px 0 8px; padding:0; max-height:50vh; overflow-y:auto; border:1px solid var(--line); border-radius:8px; }
   #stripProgress li { padding:8px 10px; border-bottom:1px solid var(--line); font-size:.9rem; overflow-wrap:anywhere; }
   #stripProgress li:last-child { border-bottom:none; }
@@ -166,8 +167,7 @@
   #guideBody h3 { margin:0; font-size:1rem; }
   #guideBody p { margin:0 0 8px; }
   #guideQuick { background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px; margin:0 0 22px; }
-  #guideQuick h3 { font-size:1.1rem; line-height:1.3; }
-  #guideQuick .hint { margin:2px 0 14px; font-size:.875rem; }
+  #guideQuick h3 { margin:0 0 14px; font-size:1.1rem; line-height:1.3; }
   #guideSteps { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:12px; }
   #guideSteps li { display:flex; gap:12px; align-items:flex-start; }
   #guideSteps .num { flex:none; width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; font-size:.875rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
@@ -219,7 +219,6 @@
   <div id="guideBody">
     <section id="guideQuick">
       <h3>Quick start</h3>
-      <p class="hint">Five steps to your first cleanup.</p>
       <ol id="guideSteps">
         <li><span class="num" aria-hidden="true">1</span><div><strong>Pick where to scan first</strong><span class="what">The scan is saved in this browser, and it can take hours, so start on whichever device you can leave running. When it's done you can copy it to your other devices and clean up from any of them. Clearing site data or uninstalling the app erases that device's copy.</span></div></li>
         <li><span class="num" aria-hidden="true">2</span><div><strong>Sign in with Google</strong><span class="what">Google shows an “unverified app” warning. That’s expected: tap Advanced, then Go to Mail Sweeper (unsafe).</span></div></li>
@@ -280,9 +279,10 @@
       <details id="guideCopy">
         <summary><span>Copy to another device</span><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6l6 -6" /></svg></summary>
         <div class="guideDetail">
-          <p>Scan once, then copy the scan to your other devices, so you can clean up from whichever one is handy. Export saves it to a file; Restore loads that file on another device and replaces the scan saved there. Afterwards each device syncs on its own, and Undo covers only what you did on that device.</p>
-          <p>To copy: tap Export, move the file to the other device (email, a cloud drive, a USB stick), sign in there with the same Google account, and tap Restore from file. Both sync with Gmail automatically. Copy again only if a device has sat unused for over a week.</p>
+          <p>Scan once, then copy the scan to your other devices, so you can clean up from whichever one is handy. Export saves it to a file; Restore loads that file on another device and replaces any scan saved there. Afterwards each device syncs on its own.</p>
+          <p>To copy: tap Export, move the file to the other device (email, a cloud drive, a USB stick), sign in there with the same Google account, and tap Restore from file. Both sync with Gmail automatically.</p>
           <p>The file lists sender addresses, dates and sizes for your whole mailbox. Keep it private and delete it when you're done.</p>
+          <p>If this app goes more than a week without being opened and synced on a device, Gmail may reject its saved checkpoint, and the next Sync falls back to a slow full check of the whole mailbox. Restoring an export from a device you use regularly skips that, since it copies an already up-to-date scan instead of rebuilding one from Gmail.</p>
         </div>
       </details>
       <details id="guideExplore">
@@ -1080,7 +1080,7 @@ async function handleRestoreFile(file) {
     const text = await cacheTextFromBytes(await readFileBytes(file));
     payload = JSON.parse(text);
   } catch (e) {
-    if (e.message === 'nodecompress') { toast("This file is compressed, and this browser can't open it. Update your browser and try again.", { alert: true }); return; }
+    if (e.message === 'nodecompress') { toast("This browser can't unzip this file. Unzip the .gz file on a computer first, then choose the unzipped .json file here.", { alert: true }); return; }
     if (e.message === 'damaged') { toast('That saved-scan file looks damaged (it could not be unzipped).', { alert: true }); return; }
     toast('Could not read that file as a saved-scan file.', { alert: true }); return;
   }
@@ -1725,6 +1725,7 @@ function renderStripPreview(m, r, a) {
   const add = (tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if (cls) n.className = cls; box.append(n); return n; };
   const list = items => { const ul = document.createElement('ul'); items.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.append(li); }); box.append(ul); };
   const names = items => items.slice(0, 5).map(x => x.name).join(', ') + (items.length > 5 ? ` and ${items.length - 5} more` : '');
+  let copyStructureRecommended = false;
   add('h2', 'Strip preview');
   add('p', a.subject || '(no subject)', 'summary');
   add('p', `${m.from || '(unknown sender)'} · ${when(m)}`, 'muted');
@@ -1745,11 +1746,14 @@ function renderStripPreview(m, r, a) {
       wrapBtn.onclick = () => insertStrippedCopy({ allowWrap: true });
     } else {
       add('p', 'Could not safely rebuild this message’s structure to strip it. Use Copy structure to see why.', 'summary');
+      copyStructureRecommended = true;
     }
   } else if (!a.unsupported.length) add('p', `Nothing to strip: no attachments of ${fmt(STRIP_MIN_BYTES)} or more.`, 'summary');
   if (a.small.length) add('p', `Left in place, under ${fmt(STRIP_MIN_BYTES)}: ${a.small.length} (${names(a.small)}).`, 'muted');
   if (a.inline.length) add('p', `Inline images left in place: ${a.inline.length} (${fmt(a.inline.reduce((n, x) => n + x.bytes, 0))} in total).`, 'muted');
+  add('p', 'For troubleshooting: copies an outline of this message’s layout (no subject, sender, text or file names) so you can paste it into an AI chat when a message won’t strip.', 'muted');
   const copyBtn = add('button', 'Copy structure');
+  if (!copyStructureRecommended) copyBtn.classList.add('quiet');
   copyBtn.onclick = () => { if (lastPreview) copyStructure(lastPreview.rawBin, lastPreview.analysis); };
   add('p', 'Preview only. Nothing was changed in Gmail.', 'hint');
   const close = add('button', 'Close preview'); close.id = 'stripPreviewClose'; close.onclick = () => { box.hidden = true; lastPreview = null; };

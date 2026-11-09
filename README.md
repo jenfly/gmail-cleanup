@@ -105,7 +105,7 @@ The scan lives only in the browser that ran it. To clean up from a second device
 
 1. On the device with the scan, tap **Export saved scan**. This syncs with Gmail first, then downloads a compressed file (`mail-sweeper-cache-YYYY-MM-DD.json.gz`) to your Downloads folder. It lists sender addresses, dates and sizes for your whole mailbox, so keep it private.
 2. Move that file to the other device (email it to yourself, a cloud drive, a USB stick — whatever's easiest).
-3. On the other device, sign in with **the same Google account**, then tap **Restore from file** and pick the file. This replaces whatever scan was already saved there, then syncs with Gmail automatically. Restore also accepts the plain `.json` files made by earlier versions of the app.
+3. On the other device, sign in with **the same Google account**, then tap **Restore from file** and pick the file. This replaces whatever scan was already saved there, then syncs with Gmail automatically. Restore also accepts the plain `.json` files made by earlier versions of the app. If that device's browser is too old to open the compressed file, unzip the `.gz` file on a computer first (7-Zip on Windows; Mac and Linux can open it natively) and restore the resulting `.json` file instead.
 
 Each device then syncs independently from then on; a change made on one shows up on the other at its next Sync. Undo (trash and strip) only covers what was done on that specific device, since each copy has its own history. Restoring a file more than about a week old can trigger a slower full sync on the first run, same as reopening the app after a long gap.
 
