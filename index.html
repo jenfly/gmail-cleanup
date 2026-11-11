@@ -45,6 +45,7 @@
   button { font:inherit; min-height:48px; padding:10px 14px; touch-action:manipulation; border:1px solid var(--ink); background:transparent; color:var(--ink); border-radius:7px; }
   button.primary { background:var(--ink); color:#fff; }
   button.danger { background:#8a2c2c; border-color:#8a2c2c; color:#fff; }
+  button.quiet { border-color:var(--line); color:var(--muted); min-height:40px; padding:8px 14px; }
   button:disabled { opacity:.4; }
   button:focus-visible,input:focus-visible,select:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
   #connect,#dataAction,#pause { width:100%; }
@@ -117,6 +118,7 @@
   #reviewFilters summary::-webkit-details-marker { display:none; }
   #typeChips, #attachChips { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
   #filterFields .type-chip { position:relative; display:block; margin:0; color:var(--ink); font-size:.9rem; }
+  #filterFields .type-chip[hidden] { display:none; }
   .type-chip input { position:absolute; inset:0; width:100%; height:100%; min-height:0; margin:0; opacity:0; cursor:pointer; }
   .type-chip span { display:flex; align-items:center; min-height:44px; padding:8px 16px; border:1px solid var(--line); border-radius:22px; background:#fff; color:var(--ink); user-select:none; transition:background .15s,color .15s,border-color .15s; }
   .type-chip input:checked + span { background:var(--ink); border-color:var(--ink); color:#fff; }
@@ -296,6 +298,7 @@
         <div class="guideDetail">
           <p>Review lists messages matching whatever filters you've set, so you can select some and act on them: move them to Trash, apply a label, or strip attachments (see below). Starred messages and anything already in Trash are never included, even if selected.</p>
           <p>The ⋯ menu also has Undo trash and Undo strip, for the most recent run of each.</p>
+          <p>Messages a strip run skips are remembered, so a "Hide ones strip skipped" chip in the Attachments filter can keep them from cluttering every later review — "Forget skipped list" brings them back if you'd rather see them again.</p>
         </div>
       </details>
       <details id="guideStrip">
@@ -401,7 +404,9 @@
           <div class="field"><label>Attachments</label>
             <div id="attachChips" role="group" aria-label="Attachment filter">
               <label class="type-chip"><input type="checkbox" id="fAttach"><span>Has attachments</span></label>
+              <label class="type-chip" id="fHideSkippedChip" hidden><input type="checkbox" id="fHideSkipped"><span id="fHideSkippedLabel"></span></label>
             </div>
+            <button id="forgetSkipped" class="quiet" hidden>Forget skipped list</button>
           </div>
           <div class="row"><button id="clearFilters">Clear filters</button></div>
         </div>
@@ -1150,6 +1155,7 @@ let reviewRows = [], matchRows = [], selected = new Set(), reviewPage = 1;
 let activeTab = 'data', exploreMode = 'space', subjectCache = new Map(), renderGeneration = 0;
 let reviewVisited = false, reviewEntryFromExplore = false;
 let attachSet = null; // ids Gmail says have attachments (null until loaded)
+let stripSkipped = {}; // {messageId: reason} messages a strip run skipped, pruned to ids still in reviewRows
 const PAGE_SIZE = 25;
 
 function switchTab(name, { fromHistory = false } = {}) {
@@ -1267,10 +1273,11 @@ function applyExploreFilter(filter) {
 
 function filterValues() {
   const number=id=>$(id).value.trim()===''?null:Number($(id).value);
-  return {sender:$('fSender').value.trim().toLowerCase(),sizeFrom:number('fSizeFrom'),sizeTo:number('fSizeTo'),ageFrom:number('fAgeFrom'),ageTo:number('fAgeTo'),type:[...document.querySelectorAll('#typeChips input:checked')].map(cb=>cb.dataset.type),attach:$('fAttach').checked};
+  return {sender:$('fSender').value.trim().toLowerCase(),sizeFrom:number('fSizeFrom'),sizeTo:number('fSizeTo'),ageFrom:number('fAgeFrom'),ageTo:number('fAgeTo'),type:[...document.querySelectorAll('#typeChips input:checked')].map(cb=>cb.dataset.type),attach:$('fAttach').checked,hideSkipped:$('fHideSkipped').checked};
 }
-function matching() {
+function matching(opts={}) {
   const f=filterValues(), now=Date.now();
+  const hideSkipped = opts.hideSkipped!==undefined ? opts.hideSkipped : f.hideSkipped;
   const typeTest = !f.type.length ? (()=>true) : (l => f.type.some(type => TYPE_TESTS[type](l)));
   return reviewRows.filter(m=>{
     const size=m.size/1024**2, age=yearsOld(m,now);
@@ -1282,15 +1289,32 @@ function matching() {
     if(f.ageTo!=null&&age>=f.ageTo) return false;
     if(!typeTest(m.labels)) return false;
     if(f.attach&&!(attachSet&&attachSet.has(m.id))) return false;
+    if(hideSkipped&&stripSkipped[m.id]) return false;
     return true;
   }).sort((a,b)=>b.size-a.size||b.date-a.date);
 }
 function resetSelection(){ selected=new Set(); }
+// Loads meta.stripSkipped, dropping ids no longer in reviewRows (and re-saving if that changed anything).
+async function loadStripSkipped() {
+  const stored=(await getMeta('stripSkipped'))||{};
+  const have=new Set(reviewRows.map(m=>m.id));
+  stripSkipped={};
+  for(const id in stored) if(have.has(id)) stripSkipped[id]=stored[id];
+  if(Object.keys(stripSkipped).length!==Object.keys(stored).length) await setMeta('stripSkipped',stripSkipped);
+  return stripSkipped;
+}
+function updateHideSkippedChip() {
+  const n=Object.keys(stripSkipped).length;
+  $('fHideSkippedChip').hidden=n===0;
+  $('fHideSkippedLabel').textContent=`Hide ones strip skipped (${n.toLocaleString()})`;
+  $('forgetSkipped').hidden=n===0;
+}
 function recomputeMatches(reset=true) {
   if(reset) { resetSelection(); reviewPage=1; }
   matchRows=matching();
+  const hiddenN=$('fHideSkipped').checked ? matching({hideSkipped:false}).length-matchRows.length : 0;
   const bytes=matchRows.reduce((n,m)=>n+m.size,0);
-  $('filterSummary').textContent=` · ${matchRows.length.toLocaleString()} matches · ${fmt(bytes)}`;
+  $('filterSummary').textContent=` · ${matchRows.length.toLocaleString()} matches · ${fmt(bytes)}`+(hiddenN>0?` · ${hiddenN.toLocaleString()} hidden`:'');
   renderReviewPage();
 }
 function selectedRows(){return matchRows.filter(m=>selected.has(m.id));}
@@ -1347,6 +1371,9 @@ function renderReviewPage() {
 }
 async function refreshReview() {
   reviewRows=await everything();
+  await loadStripSkipped();
+  $('fHideSkipped').checked=!!(await getMeta('hideSkipped'));
+  updateHideSkippedChip();
   recomputeMatches(false);
   await updateTrashInfo();
   updateStatusVisibility();
@@ -2167,8 +2194,11 @@ async function stripOne(m) {
 
     const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds,threadId`);
     const rawBin = b64urlToBinary(r.raw), analysis = analyzeMime(rawBin);
-    if (analysis.unsupported.length) return { status: 'skipped', detail: analysis.unsupported.join('; ') };
-    if (!analysis.remove.length) return { status: 'skipped', detail: `no attachment of ${fmt(STRIP_MIN_BYTES)} or more` };
+    if (analysis.unsupported.length) return { status: 'skipped', detail: analysis.unsupported.join('; '), reason: 'unsupported' };
+    if (!analysis.remove.length) {
+      const reason = analysis.inline.some(x => x.bytes >= STRIP_MIN_BYTES) ? 'inline' : 'none';
+      return { status: 'skipped', detail: `no attachment of ${fmt(STRIP_MIN_BYTES)} or more`, reason };
+    }
     const newRaw = buildStrippedRaw(rawBin, analysis);
     if (!newRaw) {
       // The batch pipeline never uses the wrap path (opts.allowWrap is never passed here) —
@@ -2176,7 +2206,7 @@ async function stripOne(m) {
       // in the run, so it can be reviewed individually from the single-message preview.
       const root = parsePart(rawBin, 0, rawBin.length);
       const needsWrap = (root.type === 'multipart/alternative' || root.type === 'multipart/related') && !!buildStrippedRaw(rawBin, analysis, { allowWrap: true });
-      return { status: 'skipped', detail: needsWrap ? 'needs an extra wrapping step — review it individually' : 'could not safely rebuild this message’s structure' };
+      return { status: 'skipped', detail: needsWrap ? 'needs an extra wrapping step — review it individually' : 'could not safely rebuild this message’s structure', reason: needsWrap ? 'wrap' : 'rebuild' };
     }
 
     // Download before anything in Gmail changes, so nothing is lost if a later step fails.
@@ -2238,6 +2268,7 @@ async function stripSelected() {
     const counts = lastStripRun.counts;
     let expired = false;
     const pairs = [];
+    const skippedNow = {};
     for (let i = 0; i < targets.length && go; i++) {
       const m = targets[i];
       summaryEl.textContent = `${i + 1} of ${targets.length}: ${m.from || '(unknown sender)'}…`;
@@ -2253,6 +2284,7 @@ async function stripSelected() {
         openBtn.onclick = () => previewStripFor(m);
         li.append(openBtn);
         lastStripRun.rowByMsgId.set(m.id, { li, done: false });
+        skippedNow[m.id] = result.reason;
       }
       list.append(li);
       if (result.status === 'stripped') { counts.strippedN++; counts.strippedBytes += result.freedBytes || 0; pairs.push({ originalId: m.id, copyId: result.copyId, bytes: result.freedBytes || 0 }); }
@@ -2267,6 +2299,16 @@ async function stripSelected() {
       const log = (await getMeta('stripRunLog')) || [];
       log.push({ at: Date.now(), pairs });
       await setMeta('stripRunLog', log.slice(-10));
+    }
+    if (Object.keys(skippedNow).length) {
+      const stored = (await getMeta('stripSkipped')) || {};
+      const wasEmpty = !Object.keys(stored).length;
+      Object.assign(stored, skippedNow);
+      await setMeta('stripSkipped', stored);
+      if (wasEmpty) await setMeta('hideSkipped', true);
+      await loadStripSkipped();
+      $('fHideSkipped').checked = !!(await getMeta('hideSkipped'));
+      updateHideSkippedChip();
     }
     recomputeMatches(false); await updateTrashInfo();
 
@@ -2479,6 +2521,23 @@ $('fAttach').addEventListener('change', async () => {
   if ($('fAttach').checked && !(await ensureAttachIds())) $('fAttach').checked = false;
   recomputeMatches(true);
 });
+$('fHideSkipped').addEventListener('change', async () => {
+  await setMeta('hideSkipped', $('fHideSkipped').checked);
+  recomputeMatches(true);
+});
+$('forgetSkipped').onclick = async () => {
+  const n = Object.keys(stripSkipped).length;
+  if (!n) return;
+  const ok = confirm(`Forget the ${msgs(n)} strip skipped? They will show up in Review again.`);
+  if (!ok) return;
+  await run('meta', 'readwrite', s => { s.delete('stripSkipped'); });
+  await setMeta('hideSkipped', false);
+  stripSkipped = {};
+  $('fHideSkipped').checked = false;
+  updateHideSkippedChip();
+  recomputeMatches(true);
+  toast('Forgot the skipped list. They’ll show up in Review again.');
+};
 countMsgs().then(n => { done = n; });
 updateDataAction(true);
 renderInstall();
