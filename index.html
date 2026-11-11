@@ -2302,12 +2302,9 @@ async function stripSelected() {
     }
     if (Object.keys(skippedNow).length) {
       const stored = (await getMeta('stripSkipped')) || {};
-      const wasEmpty = !Object.keys(stored).length;
       Object.assign(stored, skippedNow);
       await setMeta('stripSkipped', stored);
-      if (wasEmpty) await setMeta('hideSkipped', true);
       await loadStripSkipped();
-      $('fHideSkipped').checked = !!(await getMeta('hideSkipped'));
       updateHideSkippedChip();
     }
     recomputeMatches(false); await updateTrashInfo();
