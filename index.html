@@ -137,6 +137,7 @@
   #stripPreview ul { margin:4px 0 8px; padding-left:20px; overflow-wrap:anywhere; }
   #stripPreview button,#stripProgress button { width:100%; }
   #stripPreview button.quiet { border-color:var(--line); color:var(--muted); }
+  #stripPreview label.checkrow { min-height:48px; margin:8px 0 0; font-weight:600; }
   #stripProgress ul { list-style:none; margin:4px 0 8px; padding:0; max-height:50vh; overflow-y:auto; border:1px solid var(--line); border-radius:8px; }
   #stripProgress li { padding:8px 10px; border-bottom:1px solid var(--line); font-size:.9rem; overflow-wrap:anywhere; }
   #stripProgress li:last-child { border-bottom:none; }
@@ -1502,6 +1503,8 @@ async function undoTrash() {
 // attachments a strip would remove, and shows the result.
 const STRIP_MIN_BYTES = 50 * 1024; // attachments smaller than this are left in place
 const STRIP_NOTE_TEXT = 'Attachments were removed from this message to save space.';
+// Used instead when any inline image was removed too, so the blank spots it leaves are explained.
+const STRIP_NOTE_TEXT_INLINE = 'Attachments and inline images were removed from this message to save space.';
 const STRIP_NOTE_BYTES = 200 + STRIP_NOTE_TEXT.length; // rough size of the note part a stripped copy would carry
 const STRIP_UNSAFE = ['multipart/signed', 'multipart/encrypted', 'application/pkcs7-mime', 'application/x-pkcs7-mime', 'application/pgp-encrypted'];
 const STRIP_REVIEW_LABEL_NAME = 'Mail Sweeper review';
@@ -1634,12 +1637,22 @@ function decodedSize(s, p) {
   if (p.enc === 'quoted-printable') { const t = s.slice(a, b); return t.length - 2 * (t.match(/=[0-9A-Fa-f]{2}/g) || []).length; }
   return Math.max(0, b - a);
 }
+// File extension for an inline image with no filename of its own.
+function inlineImageExt(type) {
+  const sub = (type.split('/')[1] || '').toLowerCase();
+  const map = { jpeg: 'jpg', pjpeg: 'jpg', jpg: 'jpg', png: 'png', gif: 'gif', webp: 'webp', bmp: 'bmp', tiff: 'tiff' };
+  return map[sub] || sub.replace(/[^a-z0-9.+-]/g, '') || 'img';
+}
 // Works out what a strip would do. Inline images (Content-ID) and files under STRIP_MIN_BYTES stay in place;
 // signed, encrypted and attached-email messages are reported as unsupported instead of guessed at.
-function analyzeMime(s) {
+// opts.includeInline (single-message preview only, never the batch pipeline) also moves inline
+// image/* parts of STRIP_MIN_BYTES or more into res.remove, marked inline: true and named by
+// their filename or inline-N.ext (never the Content-ID). With no opts the result is unchanged.
+function analyzeMime(s, opts = {}) {
   const root = parsePart(s, 0, s.length);
   const hv = n => { const x = root.hdr.find(y => y.name === n); return x ? decodeText(x.value) : ''; };
   const res = { rawSize: s.length, subject: hv('subject'), remove: [], small: [], inline: [], unsupported: [], newSize: 0 };
+  let inlineN = 0;
   const walk = p => {
     if (STRIP_UNSAFE.includes(p.type)) { res.unsupported.push(p.type === 'multipart/signed' ? 'Digitally signed message' : 'Encrypted message'); return; }
     if (p.type === 'message/rfc822' || p.type === 'message/global') { res.unsupported.push('Contains an attached email' + (p.filename ? ' (' + p.filename + ')' : '')); return; }
@@ -1650,7 +1663,15 @@ function analyzeMime(s) {
     const named = !!p.filename, attached = p.disp === 'attachment' || named;
     if (p.type.startsWith('text/') && !attached) return; // message body, calendar data, etc.
     const bytes = decodedSize(s, p);
-    if (p.cid && p.disp !== 'attachment') { res.inline.push({ name: p.filename || p.cid, type: p.type, bytes }); return; }
+    if (p.cid && p.disp !== 'attachment') {
+      if (opts.includeInline && p.type.startsWith('image/') && bytes >= STRIP_MIN_BYTES) {
+        inlineN++;
+        const name = p.filename || `inline-${inlineN}.${inlineImageExt(p.type)}`;
+        res.remove.push({ name, type: p.type, bytes, encoded: p.end - p.start, bodyStart: p.bodyStart, end: p.end, enc: p.enc, inline: true });
+        return;
+      }
+      res.inline.push({ name: p.filename || p.cid, type: p.type, bytes }); return;
+    }
     if (!attached && p.type.startsWith('text/')) return;
     const item = { name: p.filename || '(unnamed)', type: p.type, bytes, encoded: p.end - p.start, bodyStart: p.bodyStart, end: p.end, enc: p.enc };
     (bytes < STRIP_MIN_BYTES ? res.small : res.remove).push(item);
@@ -1747,7 +1768,7 @@ async function ensureAttachIds() {
   }
 }
 
-function renderStripPreview(m, r, a) {
+function renderStripPreview(m, r, a, opts = {}) {
   const box = $('stripPreview'); box.replaceChildren(); box.hidden = false;
   const add = (tag, text, cls) => { const n = document.createElement(tag); n.textContent = text; if (cls) n.className = cls; box.append(n); return n; };
   const list = items => { const ul = document.createElement('ul'); items.forEach(t => { const li = document.createElement('li'); li.textContent = t; ul.append(li); }); box.append(ul); };
@@ -1757,10 +1778,28 @@ function renderStripPreview(m, r, a) {
   add('p', a.subject || '(no subject)', 'summary');
   add('p', `${m.from || '(unknown sender)'} · ${when(m)}`, 'muted');
   if (a.unsupported.length) { add('p', 'Would be skipped, not safe to strip:', 'summary'); list(a.unsupported); }
+  const imgs = (lastPreview && lastPreview.inlineImages) || [];
+  if (imgs.length) {
+    const label = document.createElement('label'); label.className = 'checkrow';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'stripInlineToggle';
+    cb.checked = !!lastPreview.includeInline;
+    const span = document.createElement('span');
+    span.textContent = `Also remove large inline images (${imgs.length}, ${fmt(imgs.reduce((n, x) => n + x.bytes, 0))})`;
+    label.append(cb, span); box.append(label);
+    add('p', 'They’re saved in the zip, but leave blank spots in the message where they were.', 'muted');
+    cb.onchange = () => {
+      if (!lastPreview) return;
+      lastPreview.includeInline = cb.checked;
+      lastPreview.analysis = analyzeMime(lastPreview.rawBin, cb.checked ? { includeInline: true } : {});
+      renderStripPreview(lastPreview.m, r, lastPreview.analysis, { keepScroll: true });
+      const again = $('stripInlineToggle'); if (again) again.focus({ preventScroll: true });
+    };
+  }
   if (a.remove.length) {
     const total = a.remove.reduce((n, x) => n + x.bytes, 0);
-    add('p', `Would remove ${a.remove.length} ${a.remove.length === 1 ? 'attachment' : 'attachments'} (${fmt(total)}):`, 'summary');
-    list(a.remove.map(x => `${x.name} · ${x.type} · ${fmt(x.bytes)}`));
+    const what = a.remove.some(x => x.inline) ? (a.remove.length === 1 ? 'file' : 'files') : (a.remove.length === 1 ? 'attachment' : 'attachments');
+    add('p', `Would remove ${a.remove.length} ${what} (${fmt(total)}):`, 'summary');
+    list(a.remove.map(x => `${x.name} · ${x.type} · ${fmt(x.bytes)}` + (x.inline ? ' · inline' : '')));
     add('p', `Message size: ${fmt(a.rawSize)} → about ${fmt(a.newSize)}, freeing about ${fmt(Math.max(0, a.rawSize - a.newSize))}.`);
     const dl = add('button', `Download ${a.remove.length === 1 ? 'it' : 'them'} as a zip`);
     dl.onclick = downloadStripZip;
@@ -1784,7 +1823,7 @@ function renderStripPreview(m, r, a) {
   copyBtn.onclick = () => { if (lastPreview) copyStructure(lastPreview.rawBin, lastPreview.analysis); };
   add('p', 'Preview only. Nothing was changed in Gmail.', 'hint');
   const close = add('button', 'Close preview'); close.id = 'stripPreviewClose'; close.onclick = () => { box.hidden = true; lastPreview = null; };
-  box.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  if (!opts.keepScroll) box.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 // Reads one message and shows the strip preview for it, regardless of what's selected in
 // Review. Used both by the ⋯ menu (via previewStrip, for the current selection) and directly
@@ -1799,8 +1838,12 @@ async function previewStripFor(m) {
   const note = document.createElement('p'); note.textContent = 'Reading the message from Gmail…'; box.append(note);
   try {
     const r = await api(`/messages/${m.id}?format=raw&fields=raw,sizeEstimate,labelIds,threadId`);
-    const rawBin = b64urlToBinary(r.raw), analysis = analyzeMime(rawBin);
-    lastPreview = { m, rawBin, analysis, labelIds: r.labelIds, threadId: r.threadId, sizeEstimate: r.sizeEstimate };
+    // Analysed with inline images included (the checkbox's default); the inline images found are
+    // kept so the checkbox can still be drawn after it's unticked. Toggling re-analyses this same
+    // rawBin — no second read from Gmail.
+    const rawBin = b64urlToBinary(r.raw), analysis = analyzeMime(rawBin, { includeInline: true });
+    const inlineImages = analysis.remove.filter(x => x.inline);
+    lastPreview = { m, rawBin, analysis, includeInline: true, inlineImages, labelIds: r.labelIds, threadId: r.threadId, sizeEstimate: r.sizeEstimate };
     renderStripPreview(m, r, analysis);
   } catch (e) {
     if (e.message === 'expired') { box.hidden = true; expireForAction(); return; }
@@ -1818,7 +1861,7 @@ async function previewStrip() {
 // barely compress anyway. Writes local file headers, a central directory and an
 // end-of-central-directory record, each with a correct CRC-32 and UTF-8 filenames.
 // Nothing here writes to Gmail either; it only decodes bytes already fetched for the preview.
-let lastPreview = null; // {m, rawBin, analysis} for the message currently shown in #stripPreview
+let lastPreview = null; // {m, rawBin, analysis, includeInline, inlineImages, ...} for the message currently shown in #stripPreview
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -1941,7 +1984,7 @@ function downloadStripZip() {
   }));
   const zip = buildZip(entries);
   triggerDownload(zipFileName(m, analysis.subject), zip);
-  toast(`Downloaded ${msgs(entries.length)} as a zip. Nothing was changed in Gmail.`);
+  toast(`Downloaded ${entries.length} ${entries.length === 1 ? 'file' : 'files'} as a zip. Nothing was changed in Gmail.`);
 }
 /* ---------- Strip attachments, stage 3: insert a stripped copy (verify only, no trash) ---------- */
 // Inserts a real copy into Gmail so it can be checked by hand; the original is never touched
@@ -2032,6 +2075,7 @@ function buildStrippedRaw(s, analysis, opts = {}) {
   const removeSet = new Set(analysis.remove.map(x => x.bodyStart + ':' + x.end));
   const needsWrap = root.type === 'multipart/alternative' || root.type === 'multipart/related';
   if (needsWrap && !opts.allowWrap) return null;
+  const noteText = analysis.remove.some(x => x.inline) ? STRIP_NOTE_TEXT_INLINE : STRIP_NOTE_TEXT;
 
   if (needsWrap) {
     const rebuilt = rebuildMultipartBody(s, root, removeSet);
@@ -2041,7 +2085,7 @@ function buildStrippedRaw(s, analysis, opts = {}) {
     const headerBlock = rewriteContentType(s.slice(0, root.bodyStart), `multipart/mixed; boundary="${outerBoundary}"`);
     if (headerBlock === null) return null;
     const innerChild = rebuilt.ctLine + '\r\n\r\n' + rebuilt.body;
-    const notePiece = `--${outerBoundary}\r\nContent-Type: text/plain; charset="utf-8"\r\n\r\n\r\n${STRIP_NOTE_TEXT}\r\n`;
+    const notePiece = `--${outerBoundary}\r\nContent-Type: text/plain; charset="utf-8"\r\n\r\n\r\n${noteText}\r\n`;
     return headerBlock + `--${outerBoundary}\r\n` + innerChild + `\r\n` + notePiece + `--${outerBoundary}--\r\n`;
   }
 
@@ -2055,7 +2099,7 @@ function buildStrippedRaw(s, analysis, opts = {}) {
     if (r !== STRIP_DROP) kept.push(r);
   }
   const pieces = kept.map(p => `--${boundary}\r\n` + p + `\r\n`);
-  pieces.push(`--${boundary}\r\nContent-Type: text/plain; charset="utf-8"\r\n\r\n\r\n${STRIP_NOTE_TEXT}\r\n`);
+  pieces.push(`--${boundary}\r\nContent-Type: text/plain; charset="utf-8"\r\n\r\n\r\n${noteText}\r\n`);
   pieces.push(`--${boundary}--\r\n`);
   return s.slice(0, root.bodyStart) + pieces.join('');
 }
@@ -2197,7 +2241,8 @@ async function stripOne(m) {
     if (analysis.unsupported.length) return { status: 'skipped', detail: analysis.unsupported.join('; '), reason: 'unsupported' };
     if (!analysis.remove.length) {
       const reason = analysis.inline.some(x => x.bytes >= STRIP_MIN_BYTES) ? 'inline' : 'none';
-      return { status: 'skipped', detail: `no attachment of ${fmt(STRIP_MIN_BYTES)} or more`, reason };
+      const detail = reason === 'inline' ? 'only large inline images; open the preview to strip them by hand' : `no attachment of ${fmt(STRIP_MIN_BYTES)} or more`;
+      return { status: 'skipped', detail, reason };
     }
     const newRaw = buildStrippedRaw(rawBin, analysis);
     if (!newRaw) {
